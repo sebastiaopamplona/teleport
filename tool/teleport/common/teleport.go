@@ -27,7 +27,9 @@ import (
 	"strings"
 
 	"github.com/gravitational/teleport"
+	"github.com/gravitational/teleport/api/types"
 	"github.com/gravitational/teleport/lib/config"
+	dbconfigurators "github.com/gravitational/teleport/lib/configurators/databases"
 	"github.com/gravitational/teleport/lib/defaults"
 	"github.com/gravitational/teleport/lib/modules"
 	"github.com/gravitational/teleport/lib/service"
@@ -39,6 +41,9 @@ import (
 	"github.com/gravitational/trace"
 	log "github.com/sirupsen/logrus"
 )
+
+// awsDatabaseTypes list of databases supported on the configurator.
+var awsDatabaseTypes = []string{types.DatabaseTypeRDS, types.DatabaseTypeRedshift}
 
 // Options combines init/start teleport options
 type Options struct {
@@ -64,9 +69,14 @@ func Run(options Options) (app *kingpin.Application, executedCommand string, con
 	app = utils.InitCLIParser("teleport", "Clustered SSH service. Learn more at https://goteleport.com/teleport")
 
 	// define global flags:
-	var ccf config.CommandLineFlags
-	var scpFlags scp.Flags
-	var dumpFlags dumpFlags
+	var (
+		ccf                             config.CommandLineFlags
+		scpFlags                        scp.Flags
+		dumpFlags                       dumpFlags
+		configureDatabaseAWSPrintFlags  configureDatabaseAWSPrintFlags
+		configureDatabaseAWSCreateFlags configureDatabaseAWSCreateFlags
+		configureDatabaseBootstrapFlags configureDatabaseBootstrapFlags
+	)
 
 	// define commands:
 	start := app.Command("start", "Starts the Teleport service.")
@@ -205,6 +215,35 @@ func Run(options Options) (app *kingpin.Application, executedCommand string, con
 	dbStartCmd.Flag("diag-addr", "Start diagnostic prometheus and healthz endpoint.").StringVar(&ccf.DiagnosticAddr)
 	dbStartCmd.Flag("insecure", "Insecure mode disables certificate validation").BoolVar(&ccf.InsecureMode)
 	dbStartCmd.Alias(dbUsageExamples) // We're using "alias" section to display usage examples.
+	dbConfigure := dbCmd.Command("configure", "Database agent bootstrap.")
+	dbConfigureBootstrap := dbConfigure.Command("bootstrap", "Bootstrap the necessary configuration for the database agent. It reads the provided agent configuration to determine what will be bootstrapped.")
+	dbConfigureBootstrap.Flag("config", fmt.Sprintf("Path to a configuration file [%v].", defaults.ConfigFilePath)).Short('c').ExistingFileVar(&configureDatabaseBootstrapFlags.config.ConfigPath)
+	dbConfigureBootstrap.Flag("manual", "When executed in \"manual\" mode, it will print the instructions to complete the configuration instead of applying them directly.").BoolVar(&configureDatabaseBootstrapFlags.config.Manual)
+	dbConfigureBootstrap.Flag("policy-name", "Name of the Teleport Database agent policy.").Default(dbconfigurators.DefaultPolicyName).StringVar(&configureDatabaseBootstrapFlags.config.PolicyName)
+	dbConfigureBootstrap.Flag("confirm", "Do not prompt user and auto-confirm all actions.").BoolVar(&configureDatabaseBootstrapFlags.confirm)
+	dbConfigureBootstrap.Flag("attach-to-role", "Role name to attach policy to. Mutually exclusive with --attach-to-user. If none of the attach-to flags is provided, the command will try to attach the policy to the current user/role based on the credentials.").StringVar(&configureDatabaseBootstrapFlags.config.AttachToRole)
+	dbConfigureBootstrap.Flag("attach-to-user", "User name to attach policy to. Mutually exclusive with --attach-to-role. If none of the attach-to flags is provided, the command will try to attach the policy to the current user/role based on the credentials.").StringVar(&configureDatabaseBootstrapFlags.config.AttachToUser)
+
+	dbConfigureAWS := dbConfigure.Command("aws", "Bootstrap for AWS hosted databases.")
+	dbConfigureAWSPrintIAM := dbConfigureAWS.Command("print-iam", "Generate and show IAM policies.")
+	dbConfigureAWSPrintIAM.Flag("types",
+		fmt.Sprintf("Comma-separated list of database types to include in the policy. Any of %s", strings.Join(awsDatabaseTypes, ","))).
+		Short('r').
+		StringVar(&configureDatabaseAWSPrintFlags.types)
+	dbConfigureAWSPrintIAM.Flag("role", "IAM role name to attach policy to. Mutually exclusive with --user").StringVar(&configureDatabaseAWSPrintFlags.role)
+	dbConfigureAWSPrintIAM.Flag("user", "IAM user name to attach policy to. Mutually exclusive with --role").StringVar(&configureDatabaseAWSPrintFlags.user)
+	dbConfigureAWSPrintIAM.Flag("policy", "Only print IAM policy document.").BoolVar(&configureDatabaseAWSPrintFlags.policyOnly)
+	dbConfigureAWSPrintIAM.Flag("boundary", "Only print IAM boundary policy document.").BoolVar(&configureDatabaseAWSPrintFlags.boundaryOnly)
+	dbConfigureAWSCreateIAM := dbConfigureAWS.Command("create-iam", "Generate, create and attach IAM policies.")
+	dbConfigureAWSCreateIAM.Flag("types",
+		fmt.Sprintf("Comma-separated list of database types to include in the policy. Any of %s", strings.Join(awsDatabaseTypes, ","))).
+		Short('r').
+		StringVar(&configureDatabaseAWSCreateFlags.types)
+	dbConfigureAWSCreateIAM.Flag("name", "Created policy name. Defaults to empty. Will be auto-generated if not provided.").Default(dbconfigurators.DefaultPolicyName).StringVar(&configureDatabaseAWSCreateFlags.policyName)
+	dbConfigureAWSCreateIAM.Flag("attach", "Try to attach the policy to the IAM identity.").Default("true").BoolVar(&configureDatabaseAWSCreateFlags.attach)
+	dbConfigureAWSCreateIAM.Flag("confirm", "Do not prompt user and auto-confirm all actions.").BoolVar(&configureDatabaseAWSCreateFlags.confirm)
+	dbConfigureAWSCreateIAM.Flag("role", "IAM role name to attach policy to. Mutually exclusive with --user").StringVar(&configureDatabaseAWSCreateFlags.role)
+	dbConfigureAWSCreateIAM.Flag("user", "IAM user name to attach policy to. Mutually exclusive with --role").StringVar(&configureDatabaseAWSCreateFlags.user)
 
 	// define a hidden 'scp' command (it implements server-side implementation of handling
 	// 'scp' requests)
@@ -281,6 +320,12 @@ func Run(options Options) (app *kingpin.Application, executedCommand string, con
 		err = onForward()
 	case ver.FullCommand():
 		utils.PrintVersion()
+	case dbConfigureAWSPrintIAM.FullCommand():
+		err = onConfigureDatabasesAWSPrint(configureDatabaseAWSPrintFlags)
+	case dbConfigureAWSCreateIAM.FullCommand():
+		err = onConfigureDatabasesAWSCreate(configureDatabaseAWSCreateFlags)
+	case dbConfigureBootstrap.FullCommand():
+		err = onConfigureDatabaseBootstrap(configureDatabaseBootstrapFlags)
 	}
 	if err != nil {
 		utils.FatalError(err)
@@ -488,6 +533,255 @@ func onExec() error {
 func onForward() error {
 	srv.RunAndExit(teleport.ForwardSubCommand)
 	return nil
+}
+
+// configureDatabaseBootstrapFlags database configure bootstrap flags.
+type configureDatabaseBootstrapFlags struct {
+	config  dbconfigurators.BootstrapFlags
+	confirm bool
+}
+
+// onConfigureDatabaseBootstrap subcommand that bootstraps configuration for
+// database agents.
+func onConfigureDatabaseBootstrap(flags configureDatabaseBootstrapFlags) error {
+	configurators, err := dbconfigurators.BuildConfigurators(flags.config)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	fmt.Printf("Reading configuration at %q...\n\n", flags.config.ConfigPath)
+	if len(configurators) == 0 {
+		fmt.Println("The agent doesn’t require any extra configuration.")
+		return nil
+	}
+
+	for _, configurator := range configurators {
+		fmt.Println(configurator.Name())
+		printDBConfiguratorInstructions(configurator.Instructions())
+	}
+
+	if flags.config.Manual {
+		return nil
+	}
+
+	fmt.Print("\n")
+	confirmed, err := requestConfirmation(flags.confirm)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	if !confirmed {
+		return nil
+	}
+
+	for _, configurator := range configurators {
+		results := configurator.Execute(context.TODO())
+
+		for _, result := range results {
+			printDBBootstrapResultLine(configurator.Name(), result)
+			if result.Err != nil {
+				return trace.Errorf("bootstrap failed to execute, check logs above to see the cause")
+			}
+		}
+	}
+
+	return nil
+}
+
+// printDBBootstrapResultLine prints the execution step result.
+func printDBBootstrapResultLine(bootstrapperName string, result dbconfigurators.ExecutionResult) {
+	leadSymbol := "✅"
+	endText := "done"
+	if result.Err != nil {
+		leadSymbol = "❌"
+		endText = "failed"
+	}
+
+	fmt.Printf("%s[%s] %s... %s.\n", leadSymbol, bootstrapperName, result.Description, endText)
+	if result.Err != nil {
+		fmt.Printf("Failure reason: %s\n", result.Err)
+	}
+}
+
+// printDBConfiguratorInstructions prints the database configurator
+// instructions.
+func printDBConfiguratorInstructions(instructions []dbconfigurators.Instruction) {
+	for _, instruction := range instructions {
+		fmt.Println(instruction.Description)
+		if len(instruction.Details) > 0 {
+			fmt.Println(instruction.Details)
+			fmt.Print("\n")
+		}
+	}
+}
+
+// configureDatabaseAWSFlags common flags provided to aws DB configurators.
+type configureDatabaseAWSFlags struct {
+	// types comma-separated list of database types that the policies will give
+	// access to.
+	types string
+	// typesList parsed `types` into list of types.
+	typesList []string
+	// role the AWS role that policies will be attached to.
+	role string
+	// user the AWS user that policies will be attached to.
+	user string
+	// policyName name of the generated policy.
+	policyName string
+}
+
+func (f *configureDatabaseAWSFlags) CheckAndSetDefaults() error {
+	if f.policyName == "" {
+		return trace.BadParameter("--name must be non-empty string.")
+	}
+
+	if f.types == "" {
+		return trace.BadParameter("at least one --type should be provided: %s", strings.Join(awsDatabaseTypes, ","))
+	}
+
+	f.typesList = strings.Split(f.types, ",")
+typesListLoop:
+	for _, dbType := range f.typesList {
+		for _, supportedDBType := range awsDatabaseTypes {
+			if dbType == supportedDBType {
+				continue typesListLoop
+			}
+		}
+
+		return trace.BadParameter("--type %q not supported. supported types are: %s", dbType, strings.Join(awsDatabaseTypes, ","))
+	}
+
+	return nil
+}
+
+// configureDatabaseAWSPrintFlags flags of the "db configure aws print-iam"
+// subcommand.
+type configureDatabaseAWSPrintFlags struct {
+	configureDatabaseAWSFlags
+	//
+	policyOnly bool
+	//
+	boundaryOnly bool
+}
+
+// buildAWSConfigurator builds the database configurator used on AWS-specific
+// commands.
+func buildAWSConfigurator(manual bool, flags configureDatabaseAWSFlags) (dbconfigurators.Configurator, error) {
+	err := flags.CheckAndSetDefaults()
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	fileConfig := &config.FileConfig{}
+	configuratorFlags := dbconfigurators.BootstrapFlags{
+		Manual:       manual,
+		PolicyName:   flags.policyName,
+		AttachToUser: flags.user,
+		AttachToRole: flags.role,
+	}
+
+	for _, dbType := range flags.typesList {
+		switch dbType {
+		case types.DatabaseTypeRDS:
+			configuratorFlags.ForceRDSPermissions = true
+		}
+	}
+
+	configurator, err := dbconfigurators.NewAWSConfigurator(configuratorFlags, fileConfig)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	return configurator, nil
+}
+
+// onConfigureDatabasesAWSPrint is a subcommand used to print AWS IAM access
+// Teleport requires to run databases discovery on AWS.
+func onConfigureDatabasesAWSPrint(flags configureDatabaseAWSPrintFlags) error {
+	configurator, err := buildAWSConfigurator(true, flags.configureDatabaseAWSFlags)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	instructions := configurator.Instructions()
+	if flags.policyOnly {
+		// Policy is present at the details of the first instruction.
+		fmt.Println(instructions[0].Details)
+		return nil
+	}
+
+	if flags.boundaryOnly {
+		// Policy boundary is present at the details of the second instruction.
+		fmt.Println(instructions[1].Details)
+		return nil
+	}
+
+	printDBConfiguratorInstructions(instructions)
+	return nil
+}
+
+// configureDatabaseAWSPrintFlags flags of the "db configure aws create-iam"
+// subcommand.
+type configureDatabaseAWSCreateFlags struct {
+	configureDatabaseAWSFlags
+	attach  bool
+	confirm bool
+}
+
+// onConfigureDatabasesAWSCreates is a subcommand used to create AWS IAM access
+// for Teleport to run databases discovery on AWS.
+func onConfigureDatabasesAWSCreate(flags configureDatabaseAWSCreateFlags) error {
+	configurator, err := buildAWSConfigurator(false, flags.configureDatabaseAWSFlags)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	instructions := configurator.Instructions()
+	printDBConfiguratorInstructions(instructions)
+	fmt.Print("\n")
+
+	confirmed, err := requestConfirmation(flags.confirm)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	if !confirmed {
+		return nil
+	}
+
+	results := configurator.Execute(context.TODO())
+	for _, result := range results {
+		printDBBootstrapResultLine(configurator.Name(), result)
+		if result.Err != nil {
+			return trace.Errorf("bootstrap failed to execute, check logs above to see the cause")
+		}
+	}
+
+	return nil
+}
+
+// requestConfirmation waits for user confirmation and returns `true` if the
+// user confirms. The confirmation is done by typing "yes" or "y". The caller
+// can provide an autoConfirm param which will skip the user input and return
+// `true`.
+func requestConfirmation(autoConfirm bool) (bool, error) {
+	if autoConfirm {
+		return true, nil
+	}
+
+	var confirmInputText string
+	fmt.Print("Confirm? [y/N] ")
+	_, err := fmt.Scanln(&confirmInputText)
+	if err != nil {
+		return false, trace.Wrap(err)
+	}
+
+	switch strings.ToLower(strings.TrimSpace(confirmInputText)) {
+	case "y", "yes":
+		return true, nil
+	default:
+		return false, nil
+	}
 }
 
 type StdReadWriter struct {
