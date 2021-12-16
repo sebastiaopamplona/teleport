@@ -271,8 +271,9 @@ type CLIConf struct {
 	// AWSCommandArgs contains arguments that will be forwarded to AWS CLI binary.
 	AWSCommandArgs []string
 
-	Reason  string
-	Invited string
+	Reason   string
+	Invited  string
+	JoinMode string
 }
 
 // Stdout returns the stdout writer.
@@ -458,6 +459,7 @@ func Run(args []string, opts ...cliOption) error {
 	// join
 	join := app.Command("join", "Join the active SSH session")
 	join.Flag("cluster", clusterHelp).StringVar(&cf.SiteName)
+	join.Flag("mode", "Mode of joining the session, valid modes are observer and moderator").Short('m').Default("peer").StringVar(&cf.JoinMode)
 	join.Flag("reason", "The purpose of the session.").StringVar(&cf.Reason)
 	join.Flag("invite", "A comma separated list of people to mark as invited for the session.").StringVar(&cf.Invited)
 	join.Arg("session-id", "ID of the session to join").Required().StringVar(&cf.SessionID)
@@ -1751,7 +1753,7 @@ func onJoin(cf *CLIConf) error {
 		return trace.BadParameter("'%v' is not a valid session ID (must be GUID)", cf.SessionID)
 	}
 	err = client.RetryWithRelogin(cf.Context, tc, func() error {
-		return tc.Join(context.TODO(), cf.Namespace, *sid, nil)
+		return tc.Join(context.TODO(), types.SessionParticipantMode(cf.JoinMode), cf.Namespace, *sid, nil)
 	})
 	if err != nil {
 		return trace.Wrap(err)
