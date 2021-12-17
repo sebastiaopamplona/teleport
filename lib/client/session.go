@@ -42,6 +42,7 @@ import (
 	"github.com/gravitational/teleport/lib/sshutils/x11"
 	"github.com/gravitational/teleport/lib/utils"
 	"github.com/gravitational/trace"
+	"github.com/siddontang/go/log"
 )
 
 const (
@@ -463,9 +464,12 @@ func (ns *NodeSession) updateTerminalSize(s *ssh.Session) {
 }
 
 // runShell executes user's shell on the remote node under an interactive session
-func (ns *NodeSession) runShell(ctx context.Context, mode types.SessionParticipantMode, callback ShellCreatedCallback, beforeStart func(io.Writer)) error {
+func (ns *NodeSession) runShell(ctx context.Context, mode types.SessionParticipantMode, beforeStart func(io.Writer), callback ShellCreatedCallback) error {
 	return ns.interactiveSession(ctx, mode, func(s *ssh.Session, shell io.ReadWriteCloser) error {
-		beforeStart(shell)
+		if beforeStart != nil {
+			beforeStart(s.Stdout)
+		}
+
 		// start the shell on the server:
 		if err := s.Shell(); err != nil {
 			return trace.Wrap(err)

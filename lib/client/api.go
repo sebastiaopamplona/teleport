@@ -1459,7 +1459,7 @@ func (tc *TeleportClient) SSH(ctx context.Context, command []string, runLocally 
 	if len(nodeAddrs) > 1 {
 		fmt.Printf("\x1b[1mWARNING\x1b[0m: Multiple nodes match the label selector, picking first: %v\n", nodeAddrs[0])
 	}
-	return tc.runShell(ctx, nodeClient, types.SessionPeerMode, nil, func(io.Writer) {})
+	return tc.runShell(ctx, nodeClient, types.SessionPeerMode, nil, nil)
 }
 
 func (tc *TeleportClient) startPortForwarding(ctx context.Context, nodeClient *NodeClient) {
@@ -1570,12 +1570,17 @@ func (tc *TeleportClient) Join(ctx context.Context, mode types.SessionParticipan
 
 	presenceCtx, presenceCancel := context.WithCancel(ctx)
 
-	startMFA := func(out io.Writer) {
-		runPresenceTask(presenceCtx, out, site, tc, string(session.ID))
+	var beforeStart func(io.Writer)
+	if mode == types.SessionModeratorMode {
+		beforeStart = func(out io.Writer) {
+			nc.OnMFA = func() {
+				runPresenceTask(presenceCtx, out, site, tc, string(session.ID))
+			}
+		}
 	}
 
 	// running shell with a given session means "join" it:
-	err = tc.runShell(ctx, nc, mode, session, startMFA)
+	err = tc.runShell(ctx, nc, mode, session, beforeStart)
 	presenceCancel()
 	return trace.Wrap(err)
 }
@@ -2058,7 +2063,7 @@ func (tc *TeleportClient) runShell(ctx context.Context, nodeClient *NodeClient, 
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	if err = nodeSession.runShell(ctx, mode, tc.OnShellCreated, beforeStart); err != nil {
+	if err = nodeSession.runShell(ctx, mode, beforeStart, tc.OnShellCreated); err != nil {
 		switch e := trace.Unwrap(err).(type) {
 		case *ssh.ExitError:
 			tc.ExitStatus = e.ExitStatus()
