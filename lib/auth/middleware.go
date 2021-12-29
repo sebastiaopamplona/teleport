@@ -584,13 +584,8 @@ func ClientCertPool(client AccessCache, clusterName string) (*x509.CertPool, err
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
-		dbCAs, err := client.GetCertAuthorities(types.DatabaseCA, false)
-		if err != nil {
-			return nil, trace.Wrap(err)
-		}
 		authorities = append(authorities, hostCAs...)
 		authorities = append(authorities, userCAs...)
-		authorities = append(authorities, dbCAs...)
 	} else {
 		hostCA, err := client.GetCertAuthority(
 			types.CertAuthID{Type: types.HostCA, DomainName: clusterName},
@@ -604,15 +599,8 @@ func ClientCertPool(client AccessCache, clusterName string) (*x509.CertPool, err
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
-		dbCA, err := client.GetCertAuthority(
-			types.CertAuthID{Type: types.DatabaseCA, DomainName: clusterName},
-			false)
-		if err != nil {
-			return nil, trace.Wrap(err)
-		}
 		authorities = append(authorities, hostCA)
 		authorities = append(authorities, userCA)
-		authorities = append(authorities, dbCA)
 	}
 
 	for _, auth := range authorities {
