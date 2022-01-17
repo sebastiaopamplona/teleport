@@ -1904,7 +1904,7 @@ type ClientI interface {
 	WebService
 	session.Service
 	services.ClusterConfiguration
-	services.SessionV2
+	services.SessionTrackerService
 	types.Events
 
 	types.WebSessionsGetter
