@@ -2064,7 +2064,7 @@ func (tc *TeleportClient) runShell(ctx context.Context, nodeClient *NodeClient, 
 	env[teleport.SSHJoinModeEnv] = string(mode)
 	env[teleport.SSHSessionReasonEnv] = tc.Config.Reason
 
-	encoded, err := json.Marshal(tc.Config.Invited)
+	encoded, err := json.Marshal(&tc.Config.Invited)
 	if err != nil {
 		return trace.Wrap(err)
 	}
