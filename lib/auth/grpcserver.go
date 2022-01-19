@@ -1689,6 +1689,10 @@ func (g *GRPCServer) MaintainSessionPresence(stream proto.AuthService_MaintainSe
 
 	for {
 		req, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+
 		if err != nil {
 			return trace.Wrap(err)
 		}
