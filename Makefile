@@ -11,7 +11,7 @@
 #   Stable releases:   "1.0.0"
 #   Pre-releases:      "1.0.0-alpha.1", "1.0.0-beta.2", "1.0.0-rc.3"
 #   Master/dev branch: "1.0.0-dev"
-VERSION=8.0.0-alpha.1
+VERSION=8.3.0-dev
 
 DOCKER_IMAGE ?= quay.io/gravitational/teleport
 DOCKER_IMAGE_CI ?= quay.io/gravitational/teleport-ci
@@ -1017,4 +1017,4 @@ dronegen:
 # installed locally. To backport, type "make backport PR=1234 TO=branch/1,branch/2".
 .PHONY: backport
 backport:
-	(cd ./assets/backport && go run main.go -pr=$(PR) -to=$(TO))
+	(cd ./assets/backport && go run main.go -pr=$(PR) -to=$(TO)) 
