@@ -1238,7 +1238,7 @@ type kubeProxyConfig struct {
 	targetAddress       utils.NetAddr
 }
 
-func kubeProxyTlsConfig(cfg kubeProxyConfig) (*tls.Config, error) {
+func kubeProxyTLSConfig(cfg kubeProxyConfig) (*tls.Config, error) {
 	tlsConfig := &tls.Config{}
 	_, kubeConfig, err := kubeProxyClient(cfg)
 	if err != nil {
@@ -1482,7 +1482,7 @@ func kubeExec(kubeConfig *rest.Config, args kubeExecArgs) error {
 }
 
 func kubeJoin(kubeConfig kubeProxyConfig, sessionID string) (*streamproto.SessionStream, error) {
-	tlsConfig, err := kubeProxyTlsConfig(kubeConfig)
+	tlsConfig, err := kubeProxyTLSConfig(kubeConfig)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
