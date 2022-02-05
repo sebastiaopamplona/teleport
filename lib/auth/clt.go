@@ -551,7 +551,12 @@ func (c *Client) RegisterUsingToken(ctx context.Context, req *types.RegisterUsin
 		return nil, trace.Wrap(err)
 	}
 
-	return UnmarshalLegacyCerts(out.Bytes())
+	var certs proto.Certs
+	if err := json.Unmarshal(out.Bytes(), &certs); err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	return &certs, nil
 }
 
 // RegisterNewAuthServer is used to register new auth server with token
