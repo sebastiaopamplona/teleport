@@ -262,7 +262,7 @@ func (a *Agent) getHostCheckers() ([]ssh.PublicKey, error) {
 // If this is Web Service port check if proxy support ALPN SNI Listener.
 func (a *Agent) getReverseTunnelDetails() *reverseTunnelDetails {
 	pd := reverseTunnelDetails{TLSRoutingEnabled: false}
-	resp, err := webclient.Find(a.ctx, a.Addr.Addr, lib.IsInsecureDevMode(), nil)
+	resp, err := webclient.Find(a.ctx, a.Addr.Addr, lib.IsInsecureDevMode(), nil, map[string]string{})
 	if err != nil {
 		// If TLS Routing is disabled the address is the proxy reverse tunnel
 		// address the ping call will always fail.

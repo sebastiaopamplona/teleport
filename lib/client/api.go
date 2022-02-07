@@ -341,6 +341,9 @@ type Config struct {
 	// TLSRoutingEnabled indicates that proxy supports ALPN SNI server where
 	// all proxy services are exposed on a single TLS listener (Proxy Web Listener).
 	TLSRoutingEnabled bool
+
+	// ExtraProxyHeaders is a collection of http headers to be included in requests to the WebProxy.
+	ExtraProxyHeaders map[string]string
 }
 
 // CachePolicy defines cache policy for local clients
@@ -2515,7 +2518,9 @@ func (tc *TeleportClient) Ping(ctx context.Context) (*webclient.PingResponse, er
 		tc.WebProxyAddr,
 		tc.InsecureSkipVerify,
 		loopbackPool(tc.WebProxyAddr),
-		tc.AuthConnector)
+		tc.AuthConnector,
+		tc.ExtraProxyHeaders,
+	)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -2550,7 +2555,9 @@ func (tc *TeleportClient) ShowMOTD(ctx context.Context) error {
 		ctx,
 		tc.WebProxyAddr,
 		tc.InsecureSkipVerify,
-		loopbackPool(tc.WebProxyAddr))
+		loopbackPool(tc.WebProxyAddr),
+		tc.ExtraProxyHeaders,
+	)
 	if err != nil {
 		return trace.Wrap(err)
 	}

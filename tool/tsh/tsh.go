@@ -26,6 +26,7 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -35,6 +36,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/term"
+	"gopkg.in/yaml.v2"
 
 	"github.com/gravitational/teleport"
 	"github.com/gravitational/teleport/api/constants"
@@ -71,6 +73,15 @@ import (
 var log = logrus.WithFields(logrus.Fields{
 	trace.Component: teleport.ComponentTSH,
 })
+
+type TshConfig struct {
+	ExtraHeaders []ExtraProxyHeaders `yaml:"add_headers"`
+}
+
+type ExtraProxyHeaders struct {
+	Proxy   string            `yaml:"proxy"`
+	Headers map[string]string `yaml:"headers,omitempty"`
+}
 
 // CLIConf stores command line arguments and flags:
 type CLIConf struct {
@@ -270,6 +281,9 @@ type CLIConf struct {
 	AWSRole string
 	// AWSCommandArgs contains arguments that will be forwarded to AWS CLI binary.
 	AWSCommandArgs []string
+
+	// ConfOptions is configuration read from the .tsh/config.yaml file.
+	ExtraProxyHeaders []ExtraProxyHeaders
 }
 
 // Stdout returns the stdout writer.
@@ -327,6 +341,7 @@ const (
 	proxyDefaultResolutionTimeout = 2 * time.Second
 
 	teleportNamespace = "teleport.dev"
+	defaultConfigPath = "/home/alex/config.yaml" // TODO: change obvs, .tsh/*.yaml is parsed by something else.
 )
 
 // cliOption is used in tests to inject/override configuration within Run
@@ -338,6 +353,8 @@ func Run(args []string, opts ...cliOption) error {
 	utils.InitLogger(utils.LoggingForCLI, logrus.WarnLevel)
 
 	moduleCfg := modules.GetModules()
+
+	var configFilePath string
 
 	// configure CLI argument parser:
 	app := utils.InitCLIParser("tsh", "TSH: Teleport Authentication Gateway Client").Interspersed(false)
@@ -354,6 +371,7 @@ func Run(args []string, opts ...cliOption) error {
 	app.Flag("identity", "Identity file").Short('i').StringVar(&cf.IdentityFileIn)
 	app.Flag("compat", "OpenSSH compatibility flag").Hidden().StringVar(&cf.Compatibility)
 	app.Flag("cert-format", "SSH certificate format").StringVar(&cf.CertificateFormat)
+	app.Flag("config", "Path to tsh config file").Short('c').Default(defaultConfigPath).StringVar(&configFilePath)
 
 	if !moduleCfg.IsBoringBinary() {
 		// The user is *never* allowed to do this in FIPS mode.
@@ -579,6 +597,28 @@ func Run(args []string, opts ...cliOption) error {
 	command, err := app.Parse(args)
 	if err != nil {
 		return trace.Wrap(err)
+	}
+
+	readConfigFile := func(path string) (*TshConfig, error) {
+		configFile, err := os.Open(path)
+		if err != nil && trace.IsNotFound(err) {
+			if path == defaultConfigPath {
+				return &TshConfig{}, nil
+			}
+			return nil, trace.Wrap(err)
+		}
+		defer configFile.Close()
+		cfg := TshConfig{}
+		err = yaml.NewDecoder(configFile).Decode(&cfg)
+		return &cfg, err
+	}
+
+	confOptions, err := readConfigFile(configFilePath)
+	if err != nil {
+		trace.Wrap(err)
+	}
+	if confOptions != nil {
+		cf.ExtraProxyHeaders = confOptions.ExtraHeaders
 	}
 
 	// apply any options after parsing of arguments to ensure
@@ -1929,6 +1969,22 @@ func makeClient(cf *CLIConf, useProfileLogin bool) (*client.TeleportClient, erro
 	// loaded addresses, override the values
 	if err := setClientWebProxyAddr(cf, c); err != nil {
 		return nil, trace.Wrap(err)
+	}
+
+	if c.ExtraProxyHeaders == nil {
+		c.ExtraProxyHeaders = map[string]string{}
+	}
+	for _, proxyHeaders := range cf.ExtraProxyHeaders {
+		proxyGlob := utils.GlobToRegexp(proxyHeaders.Proxy)
+		proxyRegexp, err := regexp.Compile(proxyGlob)
+		if err != nil {
+			return nil, trace.WrapWithMessage(err, "Invalid proxy glob %s", proxyGlob)
+		}
+		if proxyRegexp.MatchString(c.WebProxyAddr) {
+			for k, v := range proxyHeaders.Headers {
+				c.ExtraProxyHeaders[k] = v
+			}
+		}
 	}
 
 	if len(fPorts) > 0 {
