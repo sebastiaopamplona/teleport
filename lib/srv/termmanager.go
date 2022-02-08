@@ -54,9 +54,11 @@ type TermManager struct {
 // NewTermManager creates a new TermManager.
 func NewTermManager() *TermManager {
 	return &TermManager{
-		writers:     make(map[string]io.Writer),
-		readerState: make(map[string]*int32),
-		closed:      new(int32),
+		writers:         make(map[string]io.Writer),
+		readerState:     make(map[string]*int32),
+		closed:          new(int32),
+		readStateUpdate: sync.NewCond(&sync.Mutex{}),
+		incoming:        make(chan []byte, 100),
 	}
 }
 
@@ -152,8 +154,6 @@ func (g *TermManager) Read(p []byte) (int, error) {
 
 // WriteUnconditional allows unconditional writes to the underlying writers.
 func (g *TermManager) WriteUnconditional(p []byte) (int, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
 	return g.writeToClients(p), nil
 }
 

@@ -816,8 +816,14 @@ func (s *session) launch(ctx *ServerContext) error {
 
 	s.io.BroadcastMessage("Launching session...")
 	s.state = types.SessionState_SessionStateRunning
+
+	err := s.io.On()
+	if err != nil {
+		s.log.Warnf("Failed to turn enable IO: %v.", err)
+	}
+
 	s.stateUpdate.Broadcast()
-	err := s.trackerUpdateState(types.SessionState_SessionStateRunning)
+	err = s.trackerUpdateState(types.SessionState_SessionStateRunning)
 	if err != nil {
 		s.log.Warnf("Failed to set tracker state to %v", types.SessionState_SessionStateRunning)
 	}
@@ -1059,7 +1065,6 @@ func (s *session) startInteractive(ch ssh.Channel, ctx *ServerContext) error {
 	// Start a heartbeat that marks this session as active with current members
 	// of party in the backend.
 	go s.heartbeat(ctx)
-
 	return nil
 }
 
