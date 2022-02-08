@@ -82,10 +82,12 @@ func (g *TermManager) writeToClients(p []byte) int {
 				log.Warnf("Failed to write to remote terminal: %v", err)
 			}
 
-			g.OnWriteError(key, err)
-		}
+			if g.OnWriteError != nil {
+				g.OnWriteError(key, err)
+			}
 
-		delete(g.writers, key)
+			delete(g.writers, key)
+		}
 	}
 
 	return len(p)
