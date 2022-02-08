@@ -155,14 +155,16 @@ func (g *TermManager) Read(p []byte) (int, error) {
 }
 
 // WriteUnconditional allows unconditional writes to the underlying writers.
-func (g *TermManager) WriteUnconditional(p []byte) (int, error) {
+func (g *TermManager) writeUnconditional(p []byte) (int, error) {
 	return g.writeToClients(p), nil
 }
 
 // BroadcastMessage injects a message into the stream.
 func (g *TermManager) BroadcastMessage(message string) error {
 	data := []byte("\nTeleport > " + message + "\n")
-	_, err := g.WriteUnconditional(data)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	_, err := g.writeUnconditional(data)
 	return trace.Wrap(err)
 }
 
@@ -172,7 +174,7 @@ func (g *TermManager) On() error {
 	defer g.mu.Unlock()
 	g.on = true
 	g.readStateUpdate.Broadcast()
-	_, err := g.WriteUnconditional(g.buffer)
+	_, err := g.writeUnconditional(g.buffer)
 	return trace.Wrap(err)
 }
 
