@@ -615,8 +615,6 @@ type session struct {
 
 	presenceEnabled bool
 
-	done chan bool
-
 	terminated bool
 
 	started bool
