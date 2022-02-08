@@ -1051,13 +1051,13 @@ func (s *session) startInteractive(ch ssh.Channel, ctx *ServerContext) error {
 		}
 	}
 
-	if err := s.addParty(p, types.SessionPeerMode); err != nil {
-		return trace.Wrap(err)
-	}
-
 	if err := s.term.Run(); err != nil {
 		ctx.Errorf("Unable to run shell command: %v.", err)
 		return trace.ConvertSystemError(err)
+	}
+
+	if err := s.addParty(p, types.SessionPeerMode); err != nil {
+		return trace.Wrap(err)
 	}
 
 	// Start a heartbeat that marks this session as active with current members
