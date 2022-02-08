@@ -273,7 +273,7 @@ type session struct {
 	state types.SessionState
 
 	// stateUpdate is used to notify listeners about state updates
-	stateUpdate sync.Cond
+	stateUpdate *sync.Cond
 
 	accessEvaluator auth.SessionAccessEvaluator
 
@@ -349,6 +349,7 @@ func newSession(ctx authContext, forwarder *Forwarder, req *http.Request, params
 		initiator:         initiator.ID,
 		expires:           time.Now().UTC().Add(time.Hour * 24),
 		PresenceEnabled:   ctx.Identity.GetIdentity().MFAVerified != "",
+		stateUpdate:       sync.NewCond(&sync.Mutex{}),
 	}
 
 	err = s.trackerCreate(initiator, policySets)

@@ -62,7 +62,15 @@ func NewTermManager() *TermManager {
 
 func (g *TermManager) writeToClients(p []byte) int {
 	g.history = append(g.history, p...)
-	g.history = g.history[:maxHistory]
+
+	var truncate int
+	if len(g.history) > maxHistory {
+		truncate = maxHistory
+	} else {
+		truncate = len(g.history)
+	}
+
+	g.history = g.history[:truncate]
 	atomic.AddUint64(&g.countWritten, uint64(len(p)))
 
 	for key, w := range g.writers {
@@ -151,9 +159,6 @@ func (g *TermManager) WriteUnconditional(p []byte) (int, error) {
 
 // BroadcastMessage injects a message into the stream.
 func (g *TermManager) BroadcastMessage(message string) error {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
 	data := []byte("\nTeleport > " + message + "\n")
 	_, err := g.WriteUnconditional(data)
 	return trace.Wrap(err)

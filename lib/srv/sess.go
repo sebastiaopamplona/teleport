@@ -607,7 +607,7 @@ type session struct {
 
 	access auth.SessionAccessEvaluator
 
-	stateUpdate sync.Cond
+	stateUpdate *sync.Cond
 
 	initiator string
 
@@ -702,6 +702,7 @@ func newSession(id rsession.ID, r *SessionRegistry, ctx *ServerContext) (*sessio
 		scx:             ctx,
 		presenceEnabled: ctx.Identity.Certificate.Extensions[teleport.CertExtensionMFAVerified] != "",
 		io:              NewTermManager(),
+		stateUpdate:     sync.NewCond(&sync.Mutex{}),
 	}
 
 	err = sess.trackerCreate(ctx.Identity.TeleportUser, policySets)
@@ -909,7 +910,6 @@ func (s *session) launch(ctx *ServerContext) error {
 	}
 
 	doneCh := make(chan bool, 1)
-	s.done = doneCh
 
 	// copy everything from the pty to the writer. this lets us capture all input
 	// and output of the session (because input is echoed to stdout in the pty).
@@ -1451,16 +1451,12 @@ func (s *session) checkPresence() error {
 func (s *session) checkIfStart() (bool, error) {
 	var participants []auth.SessionAccessContext
 
-	s.mu.Lock()
-
 	for _, party := range s.parties {
 		participants = append(participants, auth.SessionAccessContext{
 			Username: party.ctx.Identity.TeleportUser,
 			Roles:    party.ctx.Identity.RoleSet,
 		})
 	}
-
-	defer s.mu.Unlock()
 
 	shouldStart, _, err := s.access.FulfilledFor(participants)
 	if err != nil {
@@ -1523,7 +1519,6 @@ func (s *session) addParty(p *party, mode types.SessionParticipantMode) error {
 
 	s.stateUpdate.L.Lock()
 	defer s.stateUpdate.L.Unlock()
-
 	if s.state == types.SessionState_SessionStatePending {
 		canStart, err := s.checkIfStart()
 		if err != nil {
