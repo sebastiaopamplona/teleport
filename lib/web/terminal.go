@@ -178,6 +178,8 @@ type TerminalHandler struct {
 	buffer []byte
 
 	closeOnce sync.Once
+
+	wsLock sync.Mutex
 }
 
 // Serve builds a connect to the remote node and then pumps back two types of
@@ -388,7 +390,9 @@ func (t *TerminalHandler) promptMFAChallenge(ws *websocket.Conn) client.PromptMF
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
+		t.wsLock.Lock()
 		err = ws.WriteMessage(websocket.BinaryMessage, envelopeBytes)
+		t.wsLock.Unlock()
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -486,7 +490,9 @@ func (t *TerminalHandler) streamTerminal(ws *websocket.Conn, tc *client.Teleport
 		t.log.Errorf("Unable to marshal close event for web client.")
 		return
 	}
+	t.wsLock.Lock()
 	err = ws.WriteMessage(websocket.BinaryMessage, envelopeBytes)
+	t.wsLock.Unlock()
 	if err != nil {
 		t.log.Errorf("Unable to send close event to web client.")
 		return
@@ -528,7 +534,9 @@ func (t *TerminalHandler) streamEvents(ws *websocket.Conn, tc *client.TeleportCl
 			}
 
 			// Send bytes over the websocket to the web client.
+			t.wsLock.Lock()
 			err = ws.WriteMessage(websocket.BinaryMessage, envelopeBytes)
+			t.wsLock.Unlock()
 			if err != nil {
 				logger.Errorf("Unable to send audit event to web client: %v.", err)
 				continue
@@ -626,7 +634,9 @@ func (t *TerminalHandler) write(data []byte, ws *websocket.Conn) (n int, err err
 	}
 
 	// Send bytes over the websocket to the web client.
+	t.wsLock.Lock()
 	err = ws.WriteMessage(websocket.BinaryMessage, envelopeBytes)
+	t.wsLock.Unlock()
 	if err != nil {
 		return 0, trace.Wrap(err)
 	}
@@ -649,9 +659,10 @@ func (t *TerminalHandler) read(out []byte, ws *websocket.Conn) (n int, err error
 
 	ty, bytes, err := ws.ReadMessage()
 	if err != nil {
-		if err == io.EOF {
+		if err == io.EOF || websocket.IsCloseError(err, 1006) {
 			return 0, io.EOF
 		}
+
 		return 0, trace.Wrap(err)
 	}
 
