@@ -866,11 +866,9 @@ func (a *ServerWithRoles) ListResources(ctx context.Context, req proto.ListResou
 			switch match, err := services.MatchResourceByFilters(resource, filter); {
 			case err != nil:
 				return false, trace.Wrap(err)
-			case !match:
-				continue
+			case match:
+				resources = append(resources, resource)
 			}
-
-			resources = append(resources, resource)
 		}
 
 		return len(resources) == limit, nil
@@ -907,7 +905,8 @@ func (a *ServerWithRoles) checkAccessToResource(resource types.Resource) error {
 }
 
 // ListNodes returns a paginated list of nodes filtered by user access.
-// DELETE IN 10.0
+//
+// DELETE IN 10.0.0 in favor of ListResources.
 func (a *ServerWithRoles) ListNodes(ctx context.Context, req proto.ListNodesRequest) (page []types.Server, nextKey string, err error) {
 	if err := a.action(req.Namespace, types.KindNode, types.VerbList); err != nil {
 		return nil, "", trace.Wrap(err)
@@ -916,7 +915,7 @@ func (a *ServerWithRoles) ListNodes(ctx context.Context, req proto.ListNodesRequ
 	return a.filterAndListNodes(ctx, req)
 }
 
-// DELETE in 10.0
+// DELETE IN 10.0.0 in favor of ListResources.
 func (a *ServerWithRoles) filterAndListNodes(ctx context.Context, req proto.ListNodesRequest) (page []types.Server, nextKey string, err error) {
 	limit := int(req.Limit)
 	if limit <= 0 {
