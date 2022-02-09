@@ -69,16 +69,16 @@ type TestConnector struct{}
 
 // Connect simulates successful connection to a SQL Server.
 func (c *TestConnector) Connect(ctx context.Context, sessionCtx *common.Session, loginPacket *protocol.Login7Packet) (io.ReadWriteCloser, []mssql.Token, error) {
-	return &readWriteCloser{
-			ReadCloser: io.NopCloser(&bytes.Buffer{}),
-			Writer:     &bytes.Buffer{},
-		}, []mssql.Token{
-			mssql.LoginAckToken(),
-			mssql.DoneToken(),
-		}, nil
+	return &fakeConn{}, []mssql.Token{
+		mssql.LoginAckToken(),
+		mssql.DoneToken(),
+	}, nil
 }
 
-type readWriteCloser struct {
-	io.ReadCloser
-	io.Writer
+type fakeConn struct {
+	bytes.Buffer
+}
+
+func (c *fakeConn) Close() error {
+	return nil
 }

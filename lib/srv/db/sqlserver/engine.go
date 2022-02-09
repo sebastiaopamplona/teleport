@@ -154,11 +154,13 @@ func (e *Engine) proxy(ctx context.Context, serverConn io.ReadWriteCloser) error
 	errCh := make(chan error, 2)
 
 	go func() {
+		defer serverConn.Close()
 		_, err := io.Copy(serverConn, e.clientConn)
 		errCh <- err
 	}()
 
 	go func() {
+		defer serverConn.Close()
 		_, err := io.Copy(e.clientConn, serverConn)
 		errCh <- err
 	}()
