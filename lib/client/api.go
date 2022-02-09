@@ -458,7 +458,6 @@ func (p *ProfileStatus) DatabaseCertPathForCluster(clusterName string, databaseN
 // It's kept in <profile-dir>/keys/<proxy>/<user>-app/<cluster>/<name>-x509.pem
 func (p *ProfileStatus) AppCertPath(name string) string {
 	return keypaths.AppCertPath(p.Dir, p.Name, p.Username, p.Cluster, name)
-
 }
 
 // KubeConfigPath returns path to the specified kubeconfig for this profile.
@@ -1496,7 +1495,7 @@ func (tc *TeleportClient) Join(ctx context.Context, namespace string, sessionID 
 	if sessionID.Check() != nil {
 		return trace.Errorf("Invalid session ID format: %s", string(sessionID))
 	}
-	var notFoundErrorMessage = fmt.Sprintf("session '%s' not found or it has ended", sessionID)
+	notFoundErrorMessage := fmt.Sprintf("session '%s' not found or it has ended", sessionID)
 
 	// connect to proxy:
 	if !tc.Config.ProxySpecified() {
@@ -3143,9 +3142,9 @@ func lineFromConsole() (string, error) {
 // { "name" -> "value", "long name" -> "quoted value" }
 func ParseLabelSpec(spec string) (map[string]string, error) {
 	tokens := []string{}
-	var openQuotes = false
+	openQuotes := false
 	var tokenStart, assignCount int
-	var specLen = len(spec)
+	specLen := len(spec)
 	// tokenize the label spec:
 	for i, ch := range spec {
 		endOfToken := false
@@ -3181,6 +3180,44 @@ func ParseLabelSpec(spec string) (map[string]string, error) {
 		labels[tokens[i]] = tokens[i+1]
 	}
 	return labels, nil
+}
+
+// ParseSearchKeywords parses a string ie: `foo,bar baz "quoted value"` into a slice of
+// strings: ["foo,bar", "baz", "quoted value"].
+// Almost a replica to ParseLabelSpec, but with few modifications such as
+// allowing a custom delimiter. Defaults to comma delimiter if not defined.
+func ParseSearchKeywords(spec string, customDelimiter rune) []string {
+	delimiter := customDelimiter
+	if customDelimiter == 0 {
+		delimiter = rune(',')
+	}
+
+	tokens := []string{}
+	openQuotes := false
+	var tokenStart int
+	specLen := len(spec)
+	// tokenize the label search:
+	for i, ch := range spec {
+		endOfToken := false
+		if i+utf8.RuneLen(ch) == specLen {
+			i += utf8.RuneLen(ch)
+			endOfToken = true
+		}
+		switch ch {
+		case '"':
+			openQuotes = !openQuotes
+		case delimiter:
+			if !openQuotes {
+				endOfToken = true
+			}
+		}
+		if endOfToken && i > tokenStart {
+			tokens = append(tokens, strings.TrimSpace(strings.Trim(spec[tokenStart:i], `"`)))
+			tokenStart = i + 1
+		}
+	}
+
+	return tokens
 }
 
 // Executes the given command on the client machine (localhost). If no command is given,
@@ -3319,7 +3356,7 @@ func playSession(sessionEvents []events.EventFields, stream []byte) error {
 		}
 	}
 
-	var errorCh = make(chan error)
+	errorCh := make(chan error)
 	player := newSessionPlayer(sessionEvents, stream, term)
 	// keys:
 	const (
