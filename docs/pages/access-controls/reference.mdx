@@ -159,7 +159,7 @@ spec:
         # The minimum amount of users that need to match the filter expression
         # in order to satisfy the policy.
         count: 1
-     
+
     # Moderated Sessions policy that dictates the ability to join sessions
     join_sessions:
       # Defines the name of the policy. The name serves only as an
@@ -377,9 +377,18 @@ who created the session.
 
 <Details title="Version Warning: Before 8.1" opened={false}>
 Teleport versions prior to 8.1 don't support the roles exemplified below.
-You may to create such roles after an upgrade, but in the event of a cluster
+You may create such roles after upgrading, but in the event of a cluster
 downgrade they will become invalid.
 </Details>
+
+<Admonition
+  type="warning"
+  title="Preset Auditor Role"
+>
+The preset `auditor` role allows access to all events, sessions, and session
+recordings. In order for the following roles to take effect you will need to
+ensure your user doesn't also have a more permissive role like `auditor`.
+</Admonition>
 
 Role for restricted access to session recordings:
 
