@@ -793,9 +793,6 @@ func (s *session) launch() error {
 
 // join attempts to connect a party to the session.
 func (s *session) join(p *party) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if p.Ctx.User.GetName() != s.ctx.User.GetName() {
 		roleNames := p.Ctx.Identity.GetIdentity().Groups
 		roles, err := getRolesByName(s.forwarder, roleNames)
@@ -818,44 +815,62 @@ func (s *session) join(p *party) error {
 		}
 	}
 
+	s.stateUpdate.L.Lock()
+	state := s.state
+	s.stateUpdate.L.Unlock()
+
+	if state == types.SessionState_SessionStateTerminated {
+		return trace.AccessDenied("The requested session is not active")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	stringID := p.ID.String()
 	s.parties[p.ID] = p
 	s.partiesHistorical[p.ID] = p
 
-	err := s.trackerAddParticipant(p)
-	if err != nil {
-		return trace.Wrap(err)
-	}
+	go func() {
+		err := s.trackerAddParticipant(p)
+		if err != nil {
+			s.log.Warnf("Failed to update session tracker with new participant: %v.", err)
+		}
 
-	sessionJoinEvent := &apievents.SessionJoin{
-		Metadata: apievents.Metadata{
-			Type:        events.SessionJoinEvent,
-			Code:        events.SessionJoinCode,
-			ClusterName: s.ctx.teleportCluster.name,
-		},
-		KubernetesClusterMetadata: apievents.KubernetesClusterMetadata{
-			KubernetesCluster: s.ctx.kubeCluster,
-			KubernetesUsers:   []string{},
-			KubernetesGroups:  []string{},
-		},
-		SessionMetadata: apievents.SessionMetadata{
-			SessionID: s.id.String(),
-		},
-		UserMetadata: apievents.UserMetadata{
-			User:         p.Ctx.User.GetName(),
-			Login:        "root",
-			Impersonator: p.Ctx.Identity.GetIdentity().Impersonator,
-		},
-		ConnectionMetadata: apievents.ConnectionMetadata{
-			RemoteAddr: s.params.ByName("podName"),
-		},
-	}
+		sessionJoinEvent := &apievents.SessionJoin{
+			Metadata: apievents.Metadata{
+				Type:        events.SessionJoinEvent,
+				Code:        events.SessionJoinCode,
+				ClusterName: s.ctx.teleportCluster.name,
+			},
+			KubernetesClusterMetadata: apievents.KubernetesClusterMetadata{
+				KubernetesCluster: s.ctx.kubeCluster,
+				KubernetesUsers:   []string{},
+				KubernetesGroups:  []string{},
+			},
+			SessionMetadata: apievents.SessionMetadata{
+				SessionID: s.id.String(),
+			},
+			UserMetadata: apievents.UserMetadata{
+				User:         p.Ctx.User.GetName(),
+				Login:        "root",
+				Impersonator: p.Ctx.Identity.GetIdentity().Impersonator,
+			},
+			ConnectionMetadata: apievents.ConnectionMetadata{
+				RemoteAddr: s.params.ByName("podName"),
+			},
+		}
 
-	if err := s.emitter.EmitAuditEvent(s.forwarder.ctx, sessionJoinEvent); err != nil {
-		s.forwarder.log.WithError(err).Warn("Failed to emit event.")
-	}
+		if err := s.emitter.EmitAuditEvent(s.forwarder.ctx, sessionJoinEvent); err != nil {
+			s.forwarder.log.WithError(err).Warn("Failed to emit event.")
+		}
 
-	s.io.BroadcastMessage(fmt.Sprintf("User %v joined the session.", p.Ctx.User.GetName()))
+		recentWrites := s.io.GetRecentHistory()
+		_, err = p.Client.stdoutStream().Write(recentWrites)
+		if err != nil {
+			s.log.Warnf("Failed to write history to client: %v.", err)
+		}
+
+		s.io.BroadcastMessage(fmt.Sprintf("User %v joined the session.", p.Ctx.User.GetName()))
+	}()
 
 	if s.tty {
 		s.terminalSizeQueue.add(stringID, p.Client.resizeQueue())
@@ -863,12 +878,6 @@ func (s *session) join(p *party) error {
 
 	if s.tty && p.Ctx.User.GetName() == s.ctx.User.GetName() {
 		s.io.AddReader(stringID, p.Client.stdinStream())
-	}
-
-	recentWrites := s.io.GetRecentHistory()
-	_, err = p.Client.stdoutStream().Write(recentWrites)
-	if err != nil {
-		return trace.Wrap(err)
 	}
 
 	s.io.AddWriter(stringID, p.Client.stdoutStream())
@@ -890,45 +899,23 @@ func (s *session) join(p *party) error {
 		}()
 	}
 
-	s.stateUpdate.L.Lock()
-	defer s.stateUpdate.L.Unlock()
-
-	switch s.state {
-	case types.SessionState_SessionStateRunning:
-		return nil
-	case types.SessionState_SessionStatePending:
-	case types.SessionState_SessionStateTerminated:
-		return trace.AccessDenied("The requested session is not active")
-	}
-
-	canStart, _, err := s.canStart()
-	if err != nil {
-		return trace.Wrap(err)
-	}
-
-	if s.started && canStart {
-		s.state = types.SessionState_SessionStateRunning
-		s.stateUpdate.Broadcast()
-		err := s.trackerUpdateState(types.SessionState_SessionStateRunning)
+	if !s.started {
+		canStart, _, err := s.canStart()
 		if err != nil {
-			s.log.Warnf("Failed to set tracker state to %v", types.SessionState_SessionStateRunning)
+			return trace.Wrap(err)
 		}
 
-		return nil
-	}
-
-	if canStart {
-		go func() {
-			if err := s.launch(); err != nil {
-				s.log.WithError(err).Warning("Failed to launch Kubernetes session.")
-			}
-		}()
-	} else if !s.tty {
-		return trace.AccessDenied("insufficient permissions to launch non-interactive session")
-	}
-
-	if !canStart {
-		s.io.BroadcastMessage("Waiting for required participants...")
+		if canStart {
+			go func() {
+				if err := s.launch(); err != nil {
+					s.log.WithError(err).Warning("Failed to launch Kubernetes session.")
+				}
+			}()
+		} else if !s.tty {
+			return trace.AccessDenied("insufficient permissions to launch non-interactive session")
+		} else {
+			s.io.BroadcastMessage("Waiting for required participants...")
+		}
 	}
 
 	return nil
@@ -1136,6 +1123,7 @@ func (s *session) trackerCreate(p *party, policySets []*types.SessionTrackerPoli
 		KubernetesCluster: s.ctx.kubeCluster,
 		HostUser:          initiator.User,
 		HostPolicies:      policySets,
+		Login:             "root",
 	}
 
 	_, err := s.forwarder.cfg.AuthClient.CreateSessionTracker(s.forwarder.ctx, req)
