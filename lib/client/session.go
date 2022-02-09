@@ -658,7 +658,7 @@ func (ns *NodeSession) pipeInOut(shell io.ReadWriteCloser, mode types.SessionPar
 		// copy from the local input to the remote shell:
 		go func() {
 			defer ns.closer.Close()
-			buf := make([]byte, 128)
+			buf := make([]byte, 1024)
 
 			stdin := ns.terminal.Stdin()
 			if ns.terminal.IsAttached() && ns.enableEscapeSequences {
@@ -677,17 +677,17 @@ func (ns *NodeSession) pipeInOut(shell io.ReadWriteCloser, mode types.SessionPar
 
 			for {
 				n, err := stdin.Read(buf)
-				if err != nil {
-					fmt.Fprintf(ns.terminal.Stderr(), "\r\n%v\r\n", trace.Wrap(err))
-					return
-				}
-
 				if n > 0 {
 					_, err = shell.Write(buf[:n])
 					if err != nil {
 						ns.ExitMsg = err.Error()
 						return
 					}
+				}
+
+				if err != nil {
+					fmt.Fprintf(ns.terminal.Stderr(), "\r\n%v\r\n", trace.Wrap(err))
+					return
 				}
 			}
 		}()

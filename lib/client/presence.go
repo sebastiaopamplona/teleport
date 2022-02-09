@@ -42,7 +42,6 @@ func runPresenceTask(ctx context.Context, out io.Writer, auth auth.ClientI, tc *
 		return trace.Wrap(err)
 	}
 
-outer:
 	for {
 		select {
 		case <-ticker.C:
@@ -78,11 +77,9 @@ outer:
 				return trace.Wrap(err)
 			}
 		case <-ctx.Done():
-			break outer
+			return nil
 		}
 	}
-
-	return nil
 }
 
 func solveMFA(ctx context.Context, term io.Writer, tc *TeleportClient, challenge *proto.MFAAuthenticateChallenge) (*proto.MFAAuthenticateResponse, error) {

@@ -1119,7 +1119,7 @@ func (s *session) trackerGet() (types.SessionTracker, error) {
 }
 
 func (s *session) trackerCreate(p *party, policySets []*types.SessionTrackerPolicySet) error {
-	initator := &types.Participant{
+	initiator := &types.Participant{
 		ID:         p.ID.String(),
 		User:       p.Ctx.User.GetName(),
 		LastActive: time.Now().UTC(),
@@ -1131,11 +1131,10 @@ func (s *session) trackerCreate(p *party, policySets []*types.SessionTrackerPoli
 		Type:              string(types.KubernetesSessionKind),
 		Hostname:          s.podName,
 		ClusterName:       s.ctx.teleportCluster.name,
-		Login:             "root",
-		Initiator:         initator,
+		Initiator:         initiator,
 		Expires:           s.expires,
 		KubernetesCluster: s.ctx.kubeCluster,
-		HostUser:          initator.User,
+		HostUser:          initiator.User,
 		HostPolicies:      policySets,
 	}
 
