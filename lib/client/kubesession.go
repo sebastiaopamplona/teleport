@@ -95,8 +95,16 @@ func NewKubeSession(ctx context.Context, tc *TeleportClient, meta types.SessionT
 		term.InitRaw(true)
 	}
 
-	handleOutgoingResizeEvent(ctx, stream, term)
-	handleIncomingResizeEvent(stream, closeWait, term)
+	go func() {
+		handleOutgoingResizeEvents(ctx, stream, term)
+	}()
+
+	closeWait.Add(1)
+	go func() {
+		handleIncomingResizeEvents(stream, term)
+		closeWait.Done()
+	}()
+
 	s := &KubeSession{stream: stream, term: term, ctx: ctx, cancelFunc: cancel, closeWait: closeWait, meta: meta}
 	err = s.handleMFA(ctx, tc, mode)
 	if err != nil {
@@ -113,54 +121,46 @@ func (s *KubeSession) cancel() {
 	})
 }
 
-func handleOutgoingResizeEvent(ctx context.Context, stream *streamproto.SessionStream, term *terminal.Terminal) {
-	go func() {
-		queue := stream.ResizeQueue()
+func handleOutgoingResizeEvents(ctx context.Context, stream *streamproto.SessionStream, term *terminal.Terminal) {
+	queue := stream.ResizeQueue()
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case size := <-queue:
-				if size == nil {
-					return
-				}
-
-				term.Resize(int16(size.Width), int16(size.Height))
-			}
+	select {
+	case <-ctx.Done():
+		return
+	case size := <-queue:
+		if size == nil {
+			return
 		}
-	}()
+
+		term.Resize(int16(size.Width), int16(size.Height))
+	}
 }
 
-func handleIncomingResizeEvent(stream *streamproto.SessionStream, closeWait *sync.WaitGroup, term *terminal.Terminal) error {
-	closeWait.Add(1)
-	go func() {
-		defer closeWait.Done()
-		events := term.Subscribe()
+func handleIncomingResizeEvents(stream *streamproto.SessionStream, term *terminal.Terminal) {
+	events := term.Subscribe()
 
-		for {
-			event, more := <-events
-			_, ok := event.(terminal.ResizeEvent)
-			if ok {
-				w, h, err := term.Size()
-				if err != nil {
-					return
-				}
-
-				size := remotecommand.TerminalSize{Width: uint16(w), Height: uint16(h)}
-				err = stream.Resize(&size)
-				if err != nil {
-					fmt.Printf("Error attempting to resize terminal: %v\n\r", err)
-				}
+	for {
+		event, more := <-events
+		_, ok := event.(terminal.ResizeEvent)
+		if ok {
+			w, h, err := term.Size()
+			if err != nil {
+				fmt.Printf("Error attempting to fetch terminal size: %v\n\r", err)
 			}
 
-			if !more {
-				break
+			size := remotecommand.TerminalSize{Width: uint16(w), Height: uint16(h)}
+			err = stream.Resize(&size)
+			if err != nil {
+				fmt.Printf("Error attempting to resize terminal: %v\n\r", err)
 			}
 		}
-	}()
 
-	return nil
+		if !more {
+			break
+		}
+	}
+
+	return
 }
 
 func (s *KubeSession) handleMFA(ctx context.Context, tc *TeleportClient, mode types.SessionParticipantMode) error {

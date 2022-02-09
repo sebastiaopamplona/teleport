@@ -1575,7 +1575,10 @@ func testKubeJoin(t *testing.T, suite *KubeSuite) {
 		require.NoError(t, err)
 	}()
 
-	time.Sleep(time.Second)
+	// We need to wait for the exec request to be handled here for the session to be
+	// created. Sadly though the k8s API doesn't give us much indication of when that is.
+	time.Sleep(time.Second * 5)
+
 	stream, err := kubeJoin(kubeProxyConfig{
 		t:          teleport,
 		username:   participantUsername,
@@ -1584,18 +1587,22 @@ func testKubeJoin(t *testing.T, suite *KubeSuite) {
 	}, "")
 	require.NoError(t, err)
 	defer stream.Close()
-	time.Sleep(time.Second)
+
+	// We wait again for the second user to finish joining the session.
+	// We allow a bit of time to pass here to give the session manager time to recognize the
+	// new IO streams of the second client.
+	time.Sleep(time.Second * 5)
 
 	// lets type "echo hi" followed by "enter" and then "exit" + "enter":
 	term.Type("\aecho hi\n\r")
 
+	// Terminate the session after a moment to allow for the IO to reach the second client.
 	go func() {
-		time.Sleep(time.Second)
+		time.Sleep(time.Second * 5)
 		term.Type("\aexit\n\r\a")
 	}()
 
 	participantOutput, err := io.ReadAll(stream)
-	outputString := string(participantOutput)
 	require.NoError(t, err)
-	require.Contains(t, outputString, "echo hi")
+	require.Contains(t, participantOutput, []byte("echo hi"))
 }

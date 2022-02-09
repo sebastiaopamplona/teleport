@@ -79,6 +79,7 @@ func (proxy *ProxyClient) GetActiveSessions(ctx context.Context) ([]types.Sessio
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
+	defer auth.Close()
 	sessions, err := auth.GetActiveSessionTrackers(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)

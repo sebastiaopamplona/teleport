@@ -1465,7 +1465,7 @@ message CreateSessionTrackerRequest {
     // HostPolicies is a list of RBAC policy sets held by the host user at the time of session
     // creation.
     repeated types.SessionTrackerPolicySet HostPolicies = 14
-        [ (gogoproto.jsontag) = "host_roles,omitempty" ];
+        [ (gogoproto.jsontag) = "host_policies,omitempty" ];
 }
 
 // GetSessionTrackerRequest is a request to fetch a session resource.

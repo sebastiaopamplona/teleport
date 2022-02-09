@@ -63,18 +63,20 @@ func NewTermManager() *TermManager {
 }
 
 func (g *TermManager) writeToClients(p []byte) int {
-	g.history = append(g.history, p...)
-
-	var truncate int
-	if len(g.history) > maxHistory {
-		truncate = maxHistory
-	} else {
-		truncate = len(g.history)
+	truncateFront := func(slice []byte, max int) []byte {
+		if len(slice) > max {
+			return slice[len(slice)-max:]
+		} else {
+			return slice
+		}
 	}
 
-	g.history = g.history[:truncate]
-	atomic.AddUint64(&g.countWritten, uint64(len(p)))
+	g.history = append(g.history, truncateFront(p, maxHistory)...)
+	if len(g.history) > maxHistory {
+		g.history = g.history[:maxHistory]
+	}
 
+	atomic.AddUint64(&g.countWritten, uint64(len(p)))
 	for key, w := range g.writers {
 		_, err := w.Write(p)
 		if err != nil {
@@ -154,7 +156,7 @@ func (g *TermManager) Read(p []byte) (int, error) {
 	}
 }
 
-// WriteUnconditional allows unconditional writes to the underlying writers.
+// writeUnconditional allows unconditional writes to the underlying writers.
 func (g *TermManager) writeUnconditional(p []byte) (int, error) {
 	return g.writeToClients(p), nil
 }
