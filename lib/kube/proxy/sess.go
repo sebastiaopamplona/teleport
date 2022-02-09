@@ -446,9 +446,88 @@ func (s *session) launch() error {
 		pingPeriod:         s.forwarder.cfg.ConnPingPeriod,
 	}
 
-	onFinished, err := s.lockedSetupLaunch(request, q)
+	eventPodMeta := request.eventPodMeta(request.context, s.sess.creds)
+	s.io.OnWriteError = func(idString string, err error) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.log.Errorf("Encountered error: %v with party %v. Disconnecting them from the session.", err, idString)
+		id, _ := uuid.Parse(idString)
+		if s.parties[id] != nil {
+			err = s.leave(id)
+			if err != nil {
+				s.log.Errorf("Failed to disconnect party %v from the session: %v.", idString, err)
+			}
+		}
+	}
+
+	onFinished, err := s.lockedSetupLaunch(request, q, eventPodMeta)
 	if err != nil {
 		return trace.Wrap(err)
+	}
+
+	if request.tty {
+		termParams := tsession.TerminalParams{
+			W: 100,
+			H: 100,
+		}
+
+		sessionStartEvent := &apievents.SessionStart{
+			Metadata: apievents.Metadata{
+				Type:        events.SessionStartEvent,
+				Code:        events.SessionStartCode,
+				ClusterName: s.forwarder.cfg.ClusterName,
+			},
+			ServerMetadata: apievents.ServerMetadata{
+				ServerID:        s.forwarder.cfg.ServerID,
+				ServerNamespace: s.forwarder.cfg.Namespace,
+				ServerHostname:  s.sess.teleportCluster.name,
+				ServerAddr:      s.sess.kubeAddress,
+			},
+			SessionMetadata: apievents.SessionMetadata{
+				SessionID: s.id.String(),
+				WithMFA:   s.ctx.Identity.GetIdentity().MFAVerified,
+			},
+			UserMetadata: apievents.UserMetadata{
+				User:         s.ctx.User.GetName(),
+				Login:        s.ctx.User.GetName(),
+				Impersonator: s.ctx.Identity.GetIdentity().Impersonator,
+			},
+			ConnectionMetadata: apievents.ConnectionMetadata{
+				RemoteAddr: s.req.RemoteAddr,
+				LocalAddr:  s.sess.kubeAddress,
+				Protocol:   events.EventProtocolKube,
+			},
+			TerminalSize:              termParams.Serialize(),
+			KubernetesClusterMetadata: s.ctx.eventClusterMeta(),
+			KubernetesPodMetadata:     eventPodMeta,
+			InitialCommand:            q["command"],
+			SessionRecording:          s.ctx.recordingConfig.GetMode(),
+		}
+
+		if err := s.emitter.EmitAuditEvent(s.forwarder.ctx, sessionStartEvent); err != nil {
+			s.forwarder.log.WithError(err).Warn("Failed to emit event.")
+		}
+	}
+
+	go func() {
+		select {
+		case <-time.After(time.Until(s.expires)):
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			s.io.BroadcastMessage("Session expired, closing...")
+
+			err := s.Close()
+			if err != nil {
+				s.log.WithError(err).Error("Failed to close session")
+			}
+		case <-s.closeC:
+		}
+	}()
+
+	s.podName = request.podName
+	err = s.trackerUpdateState(types.SessionState_SessionStateRunning)
+	if err != nil {
+		s.log.Warn("Failed to set tracker state to running")
 	}
 
 	defer onFinished()
@@ -474,51 +553,13 @@ func (s *session) launch() error {
 	return nil
 }
 
-func (s *session) lockedSetupLaunch(request *remoteCommandRequest, q url.Values) (func(), error) {
+func (s *session) lockedSetupLaunch(request *remoteCommandRequest, q url.Values, eventPodMeta apievents.KubernetesPodMetadata) (func(), error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	go func() {
-		select {
-		case <-time.After(time.Until(s.expires)):
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			s.io.BroadcastMessage("Session expired, closing...")
-
-			err := s.Close()
-			if err != nil {
-				s.log.WithError(err).Error("Failed to close session")
-			}
-		case <-s.closeC:
-		}
-	}()
-
-	s.podName = request.podName
-	err := s.trackerUpdateState(types.SessionState_SessionStateRunning)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-
+	var err error
 	s.started = true
 	sessionStart := s.forwarder.cfg.Clock.Now().UTC()
-	if err != nil {
-		s.log.Errorf("Failed to create cluster session: %v.", err)
-		return nil, trace.Wrap(err)
-	}
-
-	eventPodMeta := request.eventPodMeta(request.context, s.sess.creds)
-	s.io.OnWriteError = func(idString string, err error) {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		s.log.Errorf("Encountered error: %v with party %v. Disconnecting them from the session.", err, idString)
-		id, _ := uuid.Parse(idString)
-		if s.parties[id] != nil {
-			err = s.leave(id)
-			if err != nil {
-				s.log.Errorf("Failed to disconnect party %v from the session: %v.", idString, err)
-			}
-		}
-	}
 
 	if !s.sess.noAuditEvents && s.tty {
 		s.terminalSizeQueue.callback = func(resize *remotecommand.TerminalSize) {
@@ -605,50 +646,6 @@ func (s *session) lockedSetupLaunch(request *remoteCommandRequest, q url.Values)
 		s.emitter = s.forwarder.cfg.StreamEmitter
 	}
 
-	if request.tty {
-		termParams := tsession.TerminalParams{
-			W: 100,
-			H: 100,
-		}
-
-		sessionStartEvent := &apievents.SessionStart{
-			Metadata: apievents.Metadata{
-				Type:        events.SessionStartEvent,
-				Code:        events.SessionStartCode,
-				ClusterName: s.forwarder.cfg.ClusterName,
-			},
-			ServerMetadata: apievents.ServerMetadata{
-				ServerID:        s.forwarder.cfg.ServerID,
-				ServerNamespace: s.forwarder.cfg.Namespace,
-				ServerHostname:  s.sess.teleportCluster.name,
-				ServerAddr:      s.sess.kubeAddress,
-			},
-			SessionMetadata: apievents.SessionMetadata{
-				SessionID: s.id.String(),
-				WithMFA:   s.ctx.Identity.GetIdentity().MFAVerified,
-			},
-			UserMetadata: apievents.UserMetadata{
-				User:         s.ctx.User.GetName(),
-				Login:        s.ctx.User.GetName(),
-				Impersonator: s.ctx.Identity.GetIdentity().Impersonator,
-			},
-			ConnectionMetadata: apievents.ConnectionMetadata{
-				RemoteAddr: s.req.RemoteAddr,
-				LocalAddr:  s.sess.kubeAddress,
-				Protocol:   events.EventProtocolKube,
-			},
-			TerminalSize:              termParams.Serialize(),
-			KubernetesClusterMetadata: s.ctx.eventClusterMeta(),
-			KubernetesPodMetadata:     eventPodMeta,
-			InitialCommand:            q["command"],
-			SessionRecording:          s.ctx.recordingConfig.GetMode(),
-		}
-
-		if err := s.emitter.EmitAuditEvent(s.forwarder.ctx, sessionStartEvent); err != nil {
-			s.forwarder.log.WithError(err).Warn("Failed to emit event.")
-		}
-	}
-
 	// If the identity is verified with an MFA device, we enabled MFA-based presence for the session.
 	if s.PresenceEnabled {
 		go func() {
@@ -674,6 +671,9 @@ func (s *session) lockedSetupLaunch(request *remoteCommandRequest, q url.Values)
 	}
 
 	return func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+
 		for _, party := range s.parties {
 			if err := party.Client.sendStatus(err); err != nil {
 				s.forwarder.log.WithError(err).Warning("Failed to send status. Exec command was aborted by client.")
