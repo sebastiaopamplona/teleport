@@ -186,7 +186,11 @@ func (s *SessionRegistry) OpenSession(ch ssh.Channel, req *ssh.Request, ctx *Ser
 		switch mode {
 		case types.SessionModeratorMode, types.SessionObserverMode:
 		default:
-			mode = types.SessionPeerMode
+			if mode == types.SessionPeerMode || len(mode) == 0 {
+				mode = types.SessionPeerMode
+			} else {
+				return trace.BadParameter("Unrecognized session participant mode: %v", mode)
+			}
 		}
 
 		// Update the in-memory data structure that a party member has joined.

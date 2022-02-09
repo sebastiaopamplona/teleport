@@ -29,8 +29,10 @@ import (
 )
 
 const (
-	sessionPrefix               = "session_tracker"
-	retryDelay    time.Duration = time.Second
+	sessionPrefix                 = "session_tracker"
+	retryDelay      time.Duration = time.Second
+	casRetryLimit   int           = 7
+	casErrorMessage string        = "CompareAndSwap reached retry limit"
 )
 
 type sessionTracker struct {
@@ -57,7 +59,7 @@ func (s *sessionTracker) loadSession(ctx context.Context, sessionID string) (typ
 
 // UpdatePresence updates the presence status of a user in a session.
 func (s *sessionTracker) UpdatePresence(ctx context.Context, sessionID, user string) error {
-	for {
+	for i := 0; i < casRetryLimit; i++ {
 		sessionItem, err := s.bk.Get(ctx, backend.Key(sessionPrefix, sessionID))
 		if err != nil {
 			return trace.Wrap(err)
@@ -91,6 +93,8 @@ func (s *sessionTracker) UpdatePresence(ctx context.Context, sessionID, user str
 
 		return trace.Wrap(err)
 	}
+
+	return trace.CompareFailed(casErrorMessage)
 }
 
 // GetSessionTracker returns the current state of a session tracker for an active session.
@@ -166,7 +170,7 @@ func (s *sessionTracker) CreateSessionTracker(ctx context.Context, req *proto.Cr
 
 // UpdateSessionTracker updates a tracker resource for an active session.
 func (s *sessionTracker) UpdateSessionTracker(ctx context.Context, req *proto.UpdateSessionTrackerRequest) error {
-	for {
+	for i := 0; i < casRetryLimit; i++ {
 		sessionItem, err := s.bk.Get(ctx, backend.Key(sessionPrefix, req.SessionID))
 		if err != nil {
 			return trace.Wrap(err)
@@ -209,6 +213,8 @@ func (s *sessionTracker) UpdateSessionTracker(ctx context.Context, req *proto.Up
 
 		return trace.Wrap(err)
 	}
+
+	return trace.CompareFailed(casErrorMessage)
 }
 
 // RemoveSessionTracker removes a tracker resource for an active session.
