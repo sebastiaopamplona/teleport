@@ -1597,10 +1597,7 @@ func testKubeJoin(t *testing.T, suite *KubeSuite) {
 	term.Type("\aecho hi\n\r")
 
 	// Terminate the session after a moment to allow for the IO to reach the second client.
-	go func() {
-		time.Sleep(time.Second * 5)
-		term.Type("\aexit\n\r\a")
-	}()
+	time.AfterFunc(5*time.Second, func() { term.Type("\aexit\n\r\a") })
 
 	participantOutput, err := io.ReadAll(stream)
 	require.NoError(t, err)

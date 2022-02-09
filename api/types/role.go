@@ -156,7 +156,8 @@ type Role interface {
 	GetSessionPolicySet() SessionTrackerPolicySet
 }
 
-// NewRole constructs new standard role
+// NewRole constructs new standard V3 role.
+// This is mostly a legacy function and will create a role with V3 RBAC semantics.
 func NewRole(name string, spec RoleSpecV5) (Role, error) {
 	role := RoleV5{
 		Version: V3,
@@ -171,7 +172,8 @@ func NewRole(name string, spec RoleSpecV5) (Role, error) {
 	return &role, nil
 }
 
-// NewRoleV5 constructs new standard role
+// NewRoleV5 constructs new standard V5 role.
+// This creates a V5 role with V4+ RBAC semantics. This should be preferred over `NewRole`.
 func NewRoleV5(name string, spec RoleSpecV5) (Role, error) {
 	role := RoleV5{
 		Version: V5,

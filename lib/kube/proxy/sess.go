@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"reflect"
 	"strings"
 	"sync"
@@ -426,6 +427,57 @@ func (s *session) launch() error {
 		}
 	}()
 
+	s.log.Debugf("Launching session: %v", s.id)
+	s.io.BroadcastMessage("Launching session...")
+
+	q := s.req.URL.Query()
+	request := &remoteCommandRequest{
+		podNamespace:       s.params.ByName("podNamespace"),
+		podName:            s.params.ByName("podName"),
+		containerName:      q.Get("container"),
+		cmd:                q["command"],
+		stdin:              utils.AsBool(q.Get("stdin")),
+		stdout:             utils.AsBool(q.Get("stdout")),
+		stderr:             utils.AsBool(q.Get("stderr")),
+		tty:                utils.AsBool(q.Get("tty")),
+		httpRequest:        s.req,
+		httpResponseWriter: nil,
+		context:            s.req.Context(),
+		pingPeriod:         s.forwarder.cfg.ConnPingPeriod,
+	}
+
+	onFinished, err := s.lockedSetupLaunch(request, q)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	defer onFinished()
+	executor, err := s.forwarder.getExecutor(s.ctx, s.sess, s.req)
+	if err != nil {
+		s.log.WithError(err).Warning("Failed creating executor.")
+		return trace.Wrap(err)
+	}
+
+	options := remotecommand.StreamOptions{
+		Stdin:             s.io,
+		Stdout:            s.io,
+		Stderr:            s.io,
+		Tty:               request.tty,
+		TerminalSizeQueue: s.terminalSizeQueue,
+	}
+
+	if err = executor.Stream(options); err != nil {
+		s.log.WithError(err).Warning("Executor failed while streaming.")
+		return trace.Wrap(err)
+	}
+
+	return nil
+}
+
+func (s *session) lockedSetupLaunch(request *remoteCommandRequest, q url.Values) (func(), error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	go func() {
 		select {
 		case <-time.After(time.Until(s.expires)):
@@ -441,62 +493,17 @@ func (s *session) launch() error {
 		}
 	}()
 
-	// If the identity is verified with an MFA device, we enabled MFA-based presence for the session.
-	if s.PresenceEnabled {
-		go func() {
-			ticker := time.NewTicker(PresenceVerifyInterval)
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-ticker.C:
-					err := s.checkPresence()
-					if err != nil {
-						s.log.WithError(err).Error("Failed to check presence, closing session as a security measure")
-						err := s.Close()
-						if err != nil {
-							s.log.WithError(err).Error("Failed to close session")
-						}
-					}
-				case <-s.closeC:
-					return
-				}
-			}
-		}()
-	}
-
-	s.log.Debugf("Launching session: %v", s.id)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.io.BroadcastMessage("Launching session...")
-	q := s.req.URL.Query()
-	request := remoteCommandRequest{
-		podNamespace:       s.params.ByName("podNamespace"),
-		podName:            s.params.ByName("podName"),
-		containerName:      q.Get("container"),
-		cmd:                q["command"],
-		stdin:              utils.AsBool(q.Get("stdin")),
-		stdout:             utils.AsBool(q.Get("stdout")),
-		stderr:             utils.AsBool(q.Get("stderr")),
-		tty:                utils.AsBool(q.Get("tty")),
-		httpRequest:        s.req,
-		httpResponseWriter: nil,
-		context:            s.req.Context(),
-		pingPeriod:         s.forwarder.cfg.ConnPingPeriod,
-	}
-
 	s.podName = request.podName
 	err := s.trackerUpdateState(types.SessionState_SessionStateRunning)
 	if err != nil {
-		return trace.Wrap(err)
+		return nil, trace.Wrap(err)
 	}
 
 	s.started = true
 	sessionStart := s.forwarder.cfg.Clock.Now().UTC()
 	if err != nil {
 		s.log.Errorf("Failed to create cluster session: %v.", err)
-		return trace.Wrap(err)
+		return nil, trace.Wrap(err)
 	}
 
 	eventPodMeta := request.eventPodMeta(request.context, s.sess.creds)
@@ -570,7 +577,7 @@ func (s *session) launch() error {
 	if !s.sess.noAuditEvents && request.tty {
 		streamer, err := s.forwarder.newStreamer(&s.ctx)
 		if err != nil {
-			return trace.Wrap(err)
+			return nil, trace.Wrap(err)
 		}
 
 		recorder, err := events.NewAuditWriter(events.AuditWriterConfig{
@@ -590,7 +597,7 @@ func (s *session) launch() error {
 		s.recorder = recorder
 		s.emitter = recorder
 		if err != nil {
-			return trace.Wrap(err)
+			return nil, trace.Wrap(err)
 		}
 
 		s.io.AddWriter("recorder", recorder)
@@ -642,13 +649,31 @@ func (s *session) launch() error {
 		}
 	}
 
-	executor, err := s.forwarder.getExecutor(s.ctx, s.sess, s.req)
-	if err != nil {
-		s.log.WithError(err).Warning("Failed creating executor.")
-		return trace.Wrap(err)
+	// If the identity is verified with an MFA device, we enabled MFA-based presence for the session.
+	if s.PresenceEnabled {
+		go func() {
+			ticker := time.NewTicker(PresenceVerifyInterval)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ticker.C:
+					err := s.checkPresence()
+					if err != nil {
+						s.log.WithError(err).Error("Failed to check presence, closing session as a security measure")
+						err := s.Close()
+						if err != nil {
+							s.log.WithError(err).Error("Failed to close session")
+						}
+					}
+				case <-s.closeC:
+					return
+				}
+			}
+		}()
 	}
 
-	defer func() {
+	return func() {
 		for _, party := range s.parties {
 			if err := party.Client.sendStatus(err); err != nil {
 				s.forwarder.log.WithError(err).Warning("Failed to send status. Exec command was aborted by client.")
@@ -773,22 +798,7 @@ func (s *session) launch() error {
 				s.forwarder.log.WithError(err).Warn("Failed to emit event.")
 			}
 		}
-	}()
-
-	options := remotecommand.StreamOptions{
-		Stdin:             s.io,
-		Stdout:            s.io,
-		Stderr:            s.io,
-		Tty:               request.tty,
-		TerminalSizeQueue: s.terminalSizeQueue,
-	}
-
-	if err = executor.Stream(options); err != nil {
-		s.log.WithError(err).Warning("Executor failed while streaming.")
-		return trace.Wrap(err)
-	}
-
-	return nil
+	}, nil
 }
 
 // join attempts to connect a party to the session.

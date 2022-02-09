@@ -745,6 +745,9 @@ func (s *session) Close() error {
 		// (session writer) will try to close this session, causing a deadlock
 		// because of closeOnce
 		go func() {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+
 			close(s.closeC)
 			s.io.BroadcastMessage("Closing session...")
 			s.log.Infof("Closing session %v.", s.id)
@@ -1295,9 +1298,6 @@ func (s *session) String() string {
 // removePartyMember removes participant from in-memory representation of
 // party members. Occurs under a lock.
 func (s *session) removePartyMember(party *party) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	delete(s.parties, party.id)
 }
 

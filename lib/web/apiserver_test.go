@@ -983,8 +983,12 @@ func (s *WebSuite) TestResizeTerminal(c *C) {
 
 	// Look at the stream events for the second terminal. We don't expect to see
 	// any resize events yet. It will timeout.
-	err = s.waitForResizeEvent(ws2, 1*time.Second)
-	c.Assert(err, NotNil)
+	ws2Event := s.listenForResizeEvent(ws2)
+	select {
+	case <-ws2Event:
+		c.Fatal("unexpected resize event")
+	case <-time.After(time.Second):
+	}
 
 	// Resize the second terminal. This should be reflected on the first terminal
 	// because resize events are not sent back to the originator.
@@ -1012,8 +1016,11 @@ func (s *WebSuite) TestResizeTerminal(c *C) {
 	c.Assert(err, IsNil)
 
 	// The second terminal will not see any resize event. It will timeout.
-	err = s.waitForResizeEvent(ws2, 1*time.Second)
-	c.Assert(err, NotNil)
+	select {
+	case <-ws2Event:
+		c.Fatal("unexpected resize event")
+	case <-time.After(time.Second):
+	}
 }
 
 func (s *WebSuite) TestTerminal(c *C) {
@@ -2984,6 +2991,50 @@ func (s *WebSuite) waitForResizeEvent(ws *websocket.Conn, timeout time.Duration)
 			return trace.Wrap(err)
 		}
 	}
+}
+
+func (s *WebSuite) listenForResizeEvent(ws *websocket.Conn) chan struct{} {
+	ch := make(chan struct{})
+
+	go func() {
+		for {
+			ty, raw, err := ws.ReadMessage()
+			if err != nil {
+				close(ch)
+				return
+			}
+
+			if ty != websocket.BinaryMessage {
+				close(ch)
+				return
+			}
+
+			var envelope Envelope
+			err = proto.Unmarshal(raw, &envelope)
+			if err != nil {
+				close(ch)
+				return
+			}
+
+			if envelope.GetType() != defaults.WebsocketAudit {
+				continue
+			}
+
+			var e events.EventFields
+			err = json.Unmarshal([]byte(envelope.GetPayload()), &e)
+			if err != nil {
+				close(ch)
+				return
+			}
+
+			if e.GetType() == events.ResizeEvent {
+				ch <- struct{}{}
+				return
+			}
+		}
+	}()
+
+	return ch
 }
 
 func (s *WebSuite) clientNoRedirects(opts ...roundtrip.ClientParam) *client.WebClient {
