@@ -22,6 +22,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"sync"
 
 	"github.com/gravitational/teleport/lib/srv/db/common"
 	"github.com/gravitational/teleport/lib/srv/db/sqlserver/protocol"
@@ -76,9 +77,22 @@ func (c *TestConnector) Connect(ctx context.Context, sessionCtx *common.Session,
 }
 
 type fakeConn struct {
-	bytes.Buffer
+	m sync.Mutex
+	b bytes.Buffer
 }
 
-func (c *fakeConn) Close() error {
+func (b *fakeConn) Read(p []byte) (n int, err error) {
+	b.m.Lock()
+	defer b.m.Unlock()
+	return b.b.Read(p)
+}
+
+func (b *fakeConn) Write(p []byte) (n int, err error) {
+	b.m.Lock()
+	defer b.m.Unlock()
+	return b.b.Write(p)
+}
+
+func (b *fakeConn) Close() error {
 	return nil
 }
