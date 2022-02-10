@@ -268,6 +268,16 @@ type DBProxySettings struct {
 	MongoPublicAddr string `json:"mongo_public_addr,omitempty"`
 }
 
+// AuthProvider describes auth provider supported by auth server.
+type AuthProvider struct {
+	// Name is this provider ID
+	Name string `json:"name,omitempty"`
+	// Display is this provider display name
+	Display string `json:"display,omitempty"`
+	// Type is this provider type
+	Type string `json:"type,omitempty"`
+}
+
 // AuthenticationSettings contains information about server authentication
 // settings.
 type AuthenticationSettings struct {
@@ -285,12 +295,13 @@ type AuthenticationSettings struct {
 	// U2F contains the Universal Second Factor settings needed for authentication.
 	U2F *U2FSettings `json:"u2f,omitempty"`
 	// OIDC contains OIDC connector settings needed for authentication.
-	OIDC *OIDCSettings `json:"oidc,omitempty"`
+	OIDC *AuthProvider `json:"oidc,omitempty"`
 	// SAML contains SAML connector settings needed for authentication.
-	SAML *SAMLSettings `json:"saml,omitempty"`
+	SAML *AuthProvider `json:"saml,omitempty"`
 	// Github contains Github connector settings needed for authentication.
-	Github *GithubSettings `json:"github,omitempty"`
-
+	Github *AuthProvider `json:"github,omitempty"`
+	// AuthProviders is the list of all auth providers the auth server supports.
+	AuthProviders []AuthProvider `json:"auth_providers"`
 	// HasMessageOfTheDay is a flag indicating that the cluster has MOTD
 	// banner text that must be retrieved, displayed and acknowledged by
 	// the user.

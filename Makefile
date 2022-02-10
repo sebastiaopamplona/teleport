@@ -852,6 +852,7 @@ buildbox-grpc:
 		--gogofast_out=plugins=grpc,$(GOGOPROTO_IMPORTMAP):. \
 		envelope.proto
 
+	cd lib/teleterm && buf generate
 
 .PHONY: goinstall
 goinstall:
