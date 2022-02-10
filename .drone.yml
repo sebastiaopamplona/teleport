@@ -759,11 +759,13 @@ volumes:
 ---
 kind: pipeline
 type: kubernetes
-name: teleport-docker-cron
+name: teleport-docker-test-walt
 
 trigger:
-  cron:
-    - teleport-docker-cron
+  event:
+    - push
+  branch:
+    - walt/drone-docker-test
   repo:
     include:
       - gravitational/teleport
@@ -824,13 +826,10 @@ steps:
       - docker login -u="$PLUGIN_USERNAME" -p="$PLUGIN_PASSWORD" quay.io
       # OSS
       - docker build --target teleport --build-arg DOWNLOAD_TYPE=teleport --build-arg VERSION_TAG=$VERSION_TAG --build-arg OS=$OS --build-arg ARCH=$ARCH -t $OSS_IMAGE_NAME -f /go/build/Dockerfile-cron /go/build
-      - docker push $OSS_IMAGE_NAME
       # Enterprise
       - docker build --target teleport --build-arg DOWNLOAD_TYPE=teleport-ent --build-arg VERSION_TAG=$VERSION_TAG --build-arg OS=$OS --build-arg ARCH=$ARCH  -t $ENT_IMAGE_NAME -f /go/build/Dockerfile-cron /go/build
-      - docker push $ENT_IMAGE_NAME
       # Enterprise FIPS
       - docker build --target teleport-fips --build-arg DOWNLOAD_TYPE=teleport-ent --build-arg EXTRA_DOWNLOAD_ARGS="-fips" --build-arg VERSION_TAG=$VERSION_TAG --build-arg OS=$OS --build-arg ARCH=$ARCH -t $ENT_FIPS_IMAGE_NAME -f /go/build/Dockerfile-cron /go/build
-      - docker push $ENT_FIPS_IMAGE_NAME
 
   - name: Build and push Teleport containers (PREVIOUS_VERSION_ONE)
     image: docker
@@ -853,13 +852,10 @@ steps:
       - docker login -u="$PLUGIN_USERNAME" -p="$PLUGIN_PASSWORD" quay.io
       # OSS
       - docker build --target teleport --build-arg DOWNLOAD_TYPE=teleport --build-arg VERSION_TAG=$VERSION_TAG --build-arg OS=$OS --build-arg ARCH=$ARCH -t $OSS_IMAGE_NAME -f /go/build/Dockerfile-cron /go/build
-      - docker push $OSS_IMAGE_NAME
       # Enterprise
       - docker build --target teleport --build-arg DOWNLOAD_TYPE=teleport-ent --build-arg VERSION_TAG=$VERSION_TAG --build-arg OS=$OS --build-arg ARCH=$ARCH  -t $ENT_IMAGE_NAME -f /go/build/Dockerfile-cron /go/build
-      - docker push $ENT_IMAGE_NAME
       # Enterprise FIPS
       - docker build --target teleport-fips --build-arg DOWNLOAD_TYPE=teleport-ent --build-arg EXTRA_DOWNLOAD_ARGS="-fips" --build-arg VERSION_TAG=$VERSION_TAG --build-arg OS=$OS --build-arg ARCH=$ARCH -t $ENT_FIPS_IMAGE_NAME -f /go/build/Dockerfile-cron /go/build
-      - docker push $ENT_FIPS_IMAGE_NAME
 
   - name: Build and push Teleport containers (PREVIOUS_VERSION_TWO)
     image: docker
@@ -882,13 +878,10 @@ steps:
       - docker login -u="$PLUGIN_USERNAME" -p="$PLUGIN_PASSWORD" quay.io
       # OSS
       - docker build --target teleport --build-arg DOWNLOAD_TYPE=teleport --build-arg VERSION_TAG=$VERSION_TAG --build-arg OS=$OS --build-arg ARCH=$ARCH -t $OSS_IMAGE_NAME -f /go/build/Dockerfile-cron /go/build
-      - docker push $OSS_IMAGE_NAME
       # Enterprise
       - docker build --target teleport --build-arg DOWNLOAD_TYPE=teleport-ent --build-arg VERSION_TAG=$VERSION_TAG --build-arg OS=$OS --build-arg ARCH=$ARCH  -t $ENT_IMAGE_NAME -f /go/build/Dockerfile-cron /go/build
-      - docker push $ENT_IMAGE_NAME
       # Enterprise FIPS
       - docker build --target teleport-fips --build-arg DOWNLOAD_TYPE=teleport-ent --build-arg EXTRA_DOWNLOAD_ARGS="-fips" --build-arg VERSION_TAG=$VERSION_TAG --build-arg OS=$OS --build-arg ARCH=$ARCH -t $ENT_FIPS_IMAGE_NAME -f /go/build/Dockerfile-cron /go/build
-      - docker push $ENT_FIPS_IMAGE_NAME
 
   - name: Build/push Teleport Lab Docker image
     image: docker:git
@@ -915,7 +908,6 @@ steps:
       # Build and push Teleport lab image
       - docker login -u="$PLUGIN_USERNAME" -p="$PLUGIN_PASSWORD" quay.io
       - docker build --build-arg TELEPORT_TAG=$TELEPORT_TAG -t $TELEPORT_LAB_IMAGE_NAME /go/src/github.com/gravitational/teleport/docker/sshd
-      - docker push $TELEPORT_LAB_IMAGE_NAME
 
 services:
   - name: Start Docker
@@ -5192,6 +5184,6 @@ volumes:
       name: drone-s3-debrepo-pvc
 ---
 kind: signature
-hmac: 7ac7d339bb97c16a540c0514f277b141cb11fa4bfb3a072acc8bdb75fadc012f
+hmac: 43dc3755418b6a847dc2a6b4fa250fad215b4c544e37a7df1932dd7165231a56
 
 ...
