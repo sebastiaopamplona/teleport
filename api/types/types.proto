@@ -2689,6 +2689,11 @@ message WindowsDesktopServiceSpecV3 {
     string TeleportVersion = 2 [ (gogoproto.jsontag) = "teleport_version" ];
 }
 
+message WindowsDesktopFilter {
+    string HostID = 1 [ (gogoproto.jsontag) = "host_id" ];
+    string Name = 2 [ (gogoproto.jsontag) = "name" ];
+}
+
 // WindowsDesktopV3 represents a Windows host for desktop access.
 message WindowsDesktopV3 {
     // Header is the common resource header.

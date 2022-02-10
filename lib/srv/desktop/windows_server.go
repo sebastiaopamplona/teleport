@@ -655,12 +655,14 @@ func (s *WindowsService) handleConnection(proxyConn *tls.Conn) {
 	desktopName := strings.TrimSuffix(proxyConn.ConnectionState().ServerName, SNISuffix)
 	log = log.WithField("desktop-name", desktopName)
 
-	desktop, err := s.cfg.AccessPoint.GetWindowsDesktop(ctx, s.cfg.HostID, desktopName)
+	desktops, err := s.cfg.AccessPoint.GetWindowsDesktops(ctx,
+		types.WindowsDesktopFilter{HostID: s.cfg.HostID, Name: desktopName})
 	if err != nil {
 		log.WithError(err).Warning("Failed to fetch desktop by name")
 		sendTdpError("Teleport failed to find the requested desktop in its database.")
 		return
 	}
+	desktop := desktops[0]
 
 	log = log.WithField("desktop-addr", desktop.GetAddr())
 	log.Debug("Connecting to Windows desktop")
@@ -811,7 +813,8 @@ func (s *WindowsService) staticHostHeartbeatInfo(netAddr utils.NetAddr,
 // TODO(zmb3): think of an alternative way to not duplicate desktop objects
 // coming from different windows_desktop_services.
 func (s *WindowsService) nameForStaticHost(addr string) (string, error) {
-	desktops, err := s.cfg.AccessPoint.GetWindowsDesktops(s.closeCtx)
+	desktops, err := s.cfg.AccessPoint.GetWindowsDesktops(s.closeCtx,
+		types.WindowsDesktopFilter{})
 	if err != nil {
 		return "", trace.Wrap(err)
 	}

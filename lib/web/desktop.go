@@ -97,7 +97,8 @@ func createDesktopConnection(
 	//
 	// In the future, we may want to do something smarter like latency-based
 	// routing.
-	winDesktops, err := ctx.unsafeCachedAuthClient.GetWindowsDesktopsByName(r.Context(), desktopName)
+	winDesktops, err := ctx.unsafeCachedAuthClient.GetWindowsDesktops(r.Context(),
+		types.WindowsDesktopFilter{Name: desktopName})
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -127,17 +128,17 @@ func createDesktopConnection(
 			ConnType: types.WindowsDesktopTunnel,
 			ServerID: service.GetName() + "." + ctx.parent.clusterName,
 		})
-		if err != nil {
-			if trace.IsConnectionProblem(err) {
-				log.Errorf("Error connecting to service %q, trying another.", service.GetAddr())
-				continue
-			}
-			return trace.WrapWithMessage(err, "error connecting to windows_desktop_service at %q: %v", service.GetAddr(), err)
+		if err == nil {
+			break
 		}
-		break
+		if !trace.IsConnectionProblem(err) {
+			return trace.WrapWithMessage(err,
+				"error connecting to windows_desktop_service at %q: %v", service.GetAddr(), err)
+		}
+		log.Errorf("Error connecting to service %q, trying another.", service.GetAddr())
 	}
 	if err != nil {
-		return trace.Errorf("Failed to connect to any windows_desktop_service: %v", err)
+		return trace.Errorf("failed to connect to any windows_desktop_service: %v", err)
 	}
 	defer serviceCon.Close()
 	tlsConfig := ctx.clt.Config()
