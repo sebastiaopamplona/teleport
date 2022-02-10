@@ -1,4 +1,4 @@
-module github.com/gravitational/teleport/build.assets/version-check
+module github.com/gravitational/teleport/build.assets/version-ops
 
 go 1.17
 
