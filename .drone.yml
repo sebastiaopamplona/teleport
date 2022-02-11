@@ -774,7 +774,7 @@ workspace:
   path: /go
 
 clone:
-  disable: true
+  disable: false
 
 steps:
   - name: Set up variables and Dockerfile
@@ -790,13 +790,13 @@ steps:
       - apk --update --no-cache add curl
       - mkdir -p /go/build && cd /go/build
       # CURRENT_VERSION (8)
-      - echo $(git ls-remote --tags https://github.com/gravitational/teleport | cut -d'/' -f3 | grep $CURRENT_VERSION_ROOT | grep -Ev '(alpha|beta|dev|rc)' | sort -rV | head -n1) > /go/build/CURRENT_VERSION_TAG.txt
+      - (cd build.assets/version-ops && go run ./cmd/query-latest -version-spec  $CURRENT_VERSION_ROOT > /go/build/CURRENT_VERSION_TAG.txt)
       - echo "$(cat /go/build/CURRENT_VERSION_TAG.txt | cut -d. -f1 | tr -d '^v')" > /go/build/CURRENT_VERSION_TAG_GENERIC.txt
       # PREVIOUS_VERSION_ONE (7)
-      - echo $(git ls-remote --tags https://github.com/gravitational/teleport | cut -d'/' -f3 | grep $PREVIOUS_VERSION_ONE_ROOT | grep -Ev '(alpha|beta|dev|rc)' | sort -rV | head -n1) > /go/build/PREVIOUS_VERSION_ONE_TAG.txt
+      - (cd build.assets/version-ops && go run ./cmd/query-latest -version-spec  $CURRENT_VERSION_ONE_ROOT > /go/build/CURRENT_VERSION_ONE_TAG.txt)
       - echo "$(cat /go/build/PREVIOUS_VERSION_ONE_TAG.txt | cut -d. -f1 | tr -d '^v')" > /go/build/PREVIOUS_VERSION_ONE_TAG_GENERIC.txt
       # PREVIOUS_VERSION_TWO (6)
-      - echo $(git ls-remote --tags https://github.com/gravitational/teleport | cut -d'/' -f3 | grep $PREVIOUS_VERSION_TWO_ROOT | grep -Ev '(alpha|beta|dev|rc)' | sort -rV | head -n1) > /go/build/PREVIOUS_VERSION_TWO_TAG.txt
+      - (cd build.assets/version-ops && go run ./cmd/query-latest -version-spec  $CURRENT_VERSION_TWO_ROOT > /go/build/CURRENT_VERSION_TWO_TAG.txt)
       - echo "$(cat /go/build/PREVIOUS_VERSION_TWO_TAG.txt | cut -d. -f1 | tr -d '^v')" > /go/build/PREVIOUS_VERSION_TWO_TAG_GENERIC.txt
       # list versions
       - for FILE in /go/build/*.txt; do echo $FILE; cat $FILE; done
@@ -5184,6 +5184,6 @@ volumes:
       name: drone-s3-debrepo-pvc
 ---
 kind: signature
-hmac: 43dc3755418b6a847dc2a6b4fa250fad215b4c544e37a7df1932dd7165231a56
+hmac: c7d549ab70b184eb184d64f751f09403daed93e32650a363f14375d7384fe0aa
 
 ...
