@@ -414,7 +414,11 @@ func RunForward() (io.Writer, int, error) {
 
 // runCheckHomeDir check's if the active user's $HOME dir exists.
 func runCheckHomeDir() (io.Writer, int, error) {
-	if !utils.IsDir(os.Getenv("HOME")) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, teleport.HomeDirNotFound, nil
+	}
+	if !utils.IsDir(home) {
 		return nil, teleport.HomeDirNotFound, nil
 	}
 	return nil, teleport.RemoteCommandSuccess, nil
