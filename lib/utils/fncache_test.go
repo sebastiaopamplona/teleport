@@ -143,8 +143,8 @@ func testFnCacheSimple(t *testing.T, ttl time.Duration, delay time.Duration) {
 	// approxReads is the approximate expected number of reads
 	approxReads := float64(elapsed) / float64(ttl+delay)
 
-	// verify that number of actual reads is within +/- 1 of the number of expected reads.
-	require.InDelta(t, int64(approxReads), readCounter.Load(), 1)
+	// verify that number of actual reads is within +/- 2 of the number of expected reads.
+	require.InDelta(t, approxReads, readCounter.Load(), 2)
 }
 
 // TestFnCacheCancellation verifies expected cancellation behavior.  Specifically, we expect that
