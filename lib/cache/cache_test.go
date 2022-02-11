@@ -784,7 +784,7 @@ func TestListResources_NodesTTLVariant(t *testing.T) {
 
 	var resources []types.ResourceWithLabels
 	var listResourcesStartKey string
-	sortBy := &types.SortBy{
+	sortBy := types.SortBy{
 		Field:  types.ResourceMetadataName,
 		IsDesc: true,
 	}
