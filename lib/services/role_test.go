@@ -3853,11 +3853,11 @@ func TestCheckKubeGroupsAndUsers(t *testing.T) {
 			wantGroups: []string{"groupA"},
 		},
 		{
-			name:          "v4 role empty deny.kubernetes_labels",
+			name:          "v5 role empty deny.kubernetes_labels",
 			kubeResLabels: nil,
 			roles: RoleSet{
 				&types.RoleV5{
-					Version:  types.V4,
+					Version:  types.V5,
 					Metadata: types.Metadata{Name: "roleV5A", Namespace: apidefaults.Namespace},
 					Spec: types.RoleSpecV5{
 						Allow: types.RoleConditions{
@@ -3877,11 +3877,11 @@ func TestCheckKubeGroupsAndUsers(t *testing.T) {
 			},
 		},
 		{
-			name:          "v4 role with wildcard deny.kubernetes_labels",
+			name:          "v5 role with wildcard deny.kubernetes_labels",
 			kubeResLabels: nil,
 			roles: RoleSet{
 				&types.RoleV5{
-					Version:  types.V4,
+					Version:  types.V5,
 					Metadata: types.Metadata{Name: "roleV5A", Namespace: apidefaults.Namespace},
 					Spec: types.RoleSpecV5{
 						Allow: types.RoleConditions{

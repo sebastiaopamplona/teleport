@@ -162,7 +162,7 @@ func (s *SessionStream) readTask() {
 
 		ty, data, err := s.conn.ReadMessage()
 		if err != nil {
-			if err != io.EOF {
+			if err != io.EOF && !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseAbnormalClosure, websocket.CloseNoStatusReceived) {
 				log.WithError(err).Warn("Failed to read message from websocket")
 			}
 

@@ -244,7 +244,7 @@ func (s *SessionRegistry) OpenExecSession(channel ssh.Channel, req *ssh.Request,
 	}
 	ctx.Infof("Creating (exec) session %v.", sessionID)
 
-	canStart, err := sess.checkIfStart()
+	canStart, _, err := sess.checkIfStart()
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -320,38 +320,8 @@ func (s *SessionRegistry) ForceTerminate(ctx *ServerContext) error {
 
 	sess.terminated = true
 	sess.io.BroadcastMessage("Forcefully terminating session...")
-	start, end := sess.startTime, time.Now().UTC()
-
-	// Emit a session.end event for this (interactive) session.
-	sessionEndEvent := &apievents.SessionEnd{
-		Metadata: apievents.Metadata{
-			Type:        events.SessionEndEvent,
-			Code:        events.SessionEndCode,
-			ClusterName: ctx.ClusterName,
-		},
-		ServerMetadata: apievents.ServerMetadata{
-			ServerID:        ctx.srv.HostUUID(),
-			ServerLabels:    ctx.srv.GetInfo().GetAllLabels(),
-			ServerNamespace: s.srv.GetNamespace(),
-			ServerHostname:  s.srv.GetInfo().GetHostname(),
-			ServerAddr:      ctx.ServerConn.LocalAddr().String(),
-		},
-		SessionMetadata: apievents.SessionMetadata{
-			SessionID: string(sess.id),
-		},
-		UserMetadata: apievents.UserMetadata{
-			User: ctx.Identity.TeleportUser,
-		},
-		EnhancedRecording: sess.hasEnhancedRecording,
-		Participants:      sess.exportParticipants(),
-		Interactive:       true,
-		StartTime:         start,
-		EndTime:           end,
-		SessionRecording:  ctx.SessionRecordingConfig.GetMode(),
-	}
-	if err := sess.recorder.EmitAuditEvent(s.srv.Context(), sessionEndEvent); err != nil {
-		s.log.WithError(err).Warn("Failed to emit session end event.")
-	}
+	sess.term.Kill()
+	sess.doneCh <- struct{}{}
 
 	if err := sess.Close(); err != nil {
 		s.log.Errorf("Unable to close session %v: %v", sess.id, err)
@@ -622,6 +592,12 @@ type session struct {
 	terminated bool
 
 	started bool
+
+	doneCh chan struct{}
+
+	bpfContext *bpf.SessionContext
+
+	cgroupID uint64
 }
 
 // newSession creates a new session with a given ID within a given context.
@@ -705,6 +681,8 @@ func newSession(id rsession.ID, r *SessionRegistry, ctx *ServerContext) (*sessio
 		presenceEnabled: ctx.Identity.Certificate.Extensions[teleport.CertExtensionMFAVerified] != "",
 		io:              NewTermManager(),
 		stateUpdate:     sync.NewCond(&sync.Mutex{}),
+		doneCh:          make(chan struct{}, 2),
+		initiator:       ctx.Identity.TeleportUser,
 	}
 
 	err = sess.trackerCreate(ctx.Identity.TeleportUser, policySets)
@@ -819,6 +797,7 @@ func (s *session) launch(ctx *ServerContext) error {
 	s.stateUpdate.L.Lock()
 	defer s.stateUpdate.L.Unlock()
 
+	s.log.Debugf("Launching session %v.", s.id)
 	s.io.BroadcastMessage("Launching session...")
 	s.state = types.SessionState_SessionStateRunning
 
@@ -857,71 +836,6 @@ func (s *session) launch(ctx *ServerContext) error {
 		}()
 	}
 
-	// Open a BPF recording session. If BPF was not configured, not available,
-	// or running in a recording proxy, OpenSession is a NOP.
-	sessionContext := &bpf.SessionContext{
-		Context:   ctx.srv.Context(),
-		PID:       s.term.PID(),
-		Emitter:   s.recorder,
-		Namespace: ctx.srv.GetNamespace(),
-		SessionID: s.id.String(),
-		ServerID:  ctx.srv.HostUUID(),
-		Login:     ctx.Identity.Login,
-		User:      ctx.Identity.TeleportUser,
-		Events:    ctx.Identity.RoleSet.EnhancedRecordingSet(),
-	}
-	cgroupID, err := ctx.srv.GetBPF().OpenSession(sessionContext)
-	if err != nil {
-		ctx.Errorf("Failed to open enhanced recording (interactive) session: %v: %v.", s.id, err)
-		return trace.Wrap(err)
-	}
-
-	// If a cgroup ID was assigned then enhanced session recording was enabled.
-	if cgroupID > 0 {
-		s.hasEnhancedRecording = true
-		ctx.srv.GetRestrictedSessionManager().OpenSession(sessionContext, cgroupID)
-	}
-
-	// Process has been placed in a cgroup, continue execution.
-	s.term.Continue()
-
-	params := s.term.GetTerminalParams()
-	// Emit "new session created" event for the interactive session.
-	sessionStartEvent := &apievents.SessionStart{
-		Metadata: apievents.Metadata{
-			Type:        events.SessionStartEvent,
-			Code:        events.SessionStartCode,
-			ClusterName: ctx.ClusterName,
-			ID:          uuid.New().String(),
-		},
-		ServerMetadata: apievents.ServerMetadata{
-			ServerID:        ctx.srv.HostUUID(),
-			ServerLabels:    ctx.srv.GetInfo().GetAllLabels(),
-			ServerHostname:  ctx.srv.GetInfo().GetHostname(),
-			ServerAddr:      ctx.ServerConn.LocalAddr().String(),
-			ServerNamespace: ctx.srv.GetNamespace(),
-		},
-		SessionMetadata: apievents.SessionMetadata{
-			SessionID: string(s.id),
-		},
-		UserMetadata: ctx.Identity.GetUserMetadata(),
-		ConnectionMetadata: apievents.ConnectionMetadata{
-			RemoteAddr: ctx.ServerConn.RemoteAddr().String(),
-		},
-		TerminalSize:     params.Serialize(),
-		SessionRecording: ctx.SessionRecordingConfig.GetMode(),
-	}
-
-	// Local address only makes sense for non-tunnel nodes.
-	if !ctx.srv.UseTunnel() {
-		sessionStartEvent.ConnectionMetadata.LocalAddr = ctx.ServerConn.LocalAddr().String()
-	}
-	if err := s.recorder.EmitAuditEvent(ctx.srv.Context(), sessionStartEvent); err != nil {
-		s.log.WithError(err).Warn("Failed to emit session start event.")
-	}
-
-	doneCh := make(chan bool, 1)
-
 	// copy everything from the pty to the writer. this lets us capture all input
 	// and output of the session (because input is echoed to stdout in the pty).
 	// the writer contains multiple writers: the session logger and a direct
@@ -938,7 +852,7 @@ func (s *session) launch(ctx *ServerContext) error {
 		// the PTY, allowing io.Copy to return. if this is a teleport forwarding
 		// node, when the remote side closes the channel (which is what s.term.PTY()
 		// returns) io.Copy will return.
-		doneCh <- true
+		s.doneCh <- struct{}{}
 	}()
 
 	s.term.AddParty(1)
@@ -963,14 +877,14 @@ func (s *session) launch(ctx *ServerContext) error {
 		select {
 		case <-time.After(defaults.WaitCopyTimeout):
 			s.log.Errorf("Timed out waiting for PTY copy to finish, session data for %v may be missing.", s.id)
-		case <-doneCh:
+		case <-s.doneCh:
 		}
 
-		ctx.srv.GetRestrictedSessionManager().CloseSession(sessionContext, cgroupID)
+		ctx.srv.GetRestrictedSessionManager().CloseSession(s.bpfContext, s.cgroupID)
 
 		// Close the BPF recording session. If BPF was not configured, not available,
 		// or running in a recording proxy, this is simply a NOP.
-		err = ctx.srv.GetBPF().CloseSession(sessionContext)
+		err = ctx.srv.GetBPF().CloseSession(s.bpfContext)
 		if err != nil {
 			ctx.Errorf("Failed to close enhanced recording (interactive) session: %v: %v.", s.id, err)
 		}
@@ -1008,7 +922,7 @@ func (s *session) launch(ctx *ServerContext) error {
 // current session.
 func (s *session) startInteractive(ch ssh.Channel, ctx *ServerContext) error {
 	// create a new "party" (connected client)
-	p := newParty(s, ch, ctx)
+	p := newParty(s, types.SessionPeerMode, ch, ctx)
 
 	// Nodes discard events in cases when proxies are already recording them.
 	if s.registry.srv.Component() == teleport.ComponentNode &&
@@ -1037,14 +951,7 @@ func (s *session) startInteractive(ch ssh.Channel, ctx *ServerContext) error {
 		}
 	}
 
-	inReader, inWriter := io.Pipe()
-	s.inWriter = inWriter
-	s.io.AddReader("reader", inReader)
-	s.io.AddWriter("session-recorder", utils.WriteCloserWithContext(ctx.srv.Context(), s.recorder))
-	err := s.io.BroadcastMessage(fmt.Sprintf("Creating session with ID: %v...", s.id))
-	if err != nil {
-		return trace.Wrap(err)
-	}
+	var err error
 
 	// allocate a terminal or take the one previously allocated via a
 	// seaprate "allocate TTY" SSH request
@@ -1058,6 +965,50 @@ func (s *session) startInteractive(ch ssh.Channel, ctx *ServerContext) error {
 		}
 	}
 
+	params := s.term.GetTerminalParams()
+	// Emit "new session created" event for the interactive session.
+	sessionStartEvent := &apievents.SessionStart{
+		Metadata: apievents.Metadata{
+			Type:        events.SessionStartEvent,
+			Code:        events.SessionStartCode,
+			ClusterName: ctx.ClusterName,
+			ID:          uuid.New().String(),
+		},
+		ServerMetadata: apievents.ServerMetadata{
+			ServerID:        ctx.srv.HostUUID(),
+			ServerLabels:    ctx.srv.GetInfo().GetAllLabels(),
+			ServerHostname:  ctx.srv.GetInfo().GetHostname(),
+			ServerAddr:      ctx.ServerConn.LocalAddr().String(),
+			ServerNamespace: ctx.srv.GetNamespace(),
+		},
+		SessionMetadata: apievents.SessionMetadata{
+			SessionID: string(s.id),
+		},
+		UserMetadata: ctx.Identity.GetUserMetadata(),
+		ConnectionMetadata: apievents.ConnectionMetadata{
+			RemoteAddr: ctx.ServerConn.RemoteAddr().String(),
+		},
+		TerminalSize:     params.Serialize(),
+		SessionRecording: ctx.SessionRecordingConfig.GetMode(),
+	}
+
+	// Local address only makes sense for non-tunnel nodes.
+	if !ctx.srv.UseTunnel() {
+		sessionStartEvent.ConnectionMetadata.LocalAddr = ctx.ServerConn.LocalAddr().String()
+	}
+	if err := s.recorder.EmitAuditEvent(ctx.srv.Context(), sessionStartEvent); err != nil {
+		s.log.WithError(err).Warn("Failed to emit session start event.")
+	}
+
+	inReader, inWriter := io.Pipe()
+	s.inWriter = inWriter
+	s.io.AddReader("reader", inReader)
+	s.io.AddWriter("session-recorder", utils.WriteCloserWithContext(ctx.srv.Context(), s.recorder))
+	err = s.io.BroadcastMessage(fmt.Sprintf("Creating session with ID: %v...", s.id))
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
 	if err := s.term.Run(); err != nil {
 		ctx.Errorf("Unable to run shell command: %v.", err)
 		return trace.ConvertSystemError(err)
@@ -1066,6 +1017,34 @@ func (s *session) startInteractive(ch ssh.Channel, ctx *ServerContext) error {
 	if err := s.addParty(p, types.SessionPeerMode); err != nil {
 		return trace.Wrap(err)
 	}
+
+	// Open a BPF recording session. If BPF was not configured, not available,
+	// or running in a recording proxy, OpenSession is a NOP.
+	s.bpfContext = &bpf.SessionContext{
+		Context:   ctx.srv.Context(),
+		PID:       s.term.PID(),
+		Emitter:   s.recorder,
+		Namespace: ctx.srv.GetNamespace(),
+		SessionID: s.id.String(),
+		ServerID:  ctx.srv.HostUUID(),
+		Login:     ctx.Identity.Login,
+		User:      ctx.Identity.TeleportUser,
+		Events:    ctx.Identity.RoleSet.EnhancedRecordingSet(),
+	}
+	s.cgroupID, err = ctx.srv.GetBPF().OpenSession(s.bpfContext)
+	if err != nil {
+		ctx.Errorf("Failed to open enhanced recording (interactive) session: %v: %v.", s.id, err)
+		return trace.Wrap(err)
+	}
+
+	// If a cgroup ID was assigned then enhanced session recording was enabled.
+	if s.cgroupID > 0 {
+		s.hasEnhancedRecording = true
+		ctx.srv.GetRestrictedSessionManager().OpenSession(s.bpfContext, s.cgroupID)
+	}
+
+	// Process has been placed in a cgroup, continue execution.
+	s.term.Continue()
 
 	// Start a heartbeat that marks this session as active with current members
 	// of party in the backend.
@@ -1309,14 +1288,20 @@ func (s *session) removeParty(p *party) error {
 	// Removes participant from in-memory map of party members.
 	s.removePartyMember(p)
 
-	canRun, err := s.checkIfStart()
+	canRun, policyOptions, err := s.checkIfStart()
 	if err != nil {
 		return trace.Wrap(err)
 	}
 
-	if !canRun {
-		s.stateUpdate.L.Lock()
-		defer s.stateUpdate.L.Unlock()
+	s.stateUpdate.L.Lock()
+	defer s.stateUpdate.L.Unlock()
+
+	if !canRun && s.state == types.SessionState_SessionStateRunning {
+		if policyOptions.TerminateOnLeave {
+			s.registry.ForceTerminate(s.scx)
+			return nil
+		}
+
 		s.state = types.SessionState_SessionStatePending
 		s.stateUpdate.Broadcast()
 		err := s.trackerUpdateState(types.SessionState_SessionStatePending)
@@ -1436,7 +1421,7 @@ func (s *session) checkPresence() error {
 	}
 
 	for _, participant := range sess.GetParticipants() {
-		if participant.ID == s.initiator {
+		if participant.User == s.initiator {
 			continue
 		}
 
@@ -1455,22 +1440,27 @@ func (s *session) checkPresence() error {
 	return nil
 }
 
-func (s *session) checkIfStart() (bool, error) {
+func (s *session) checkIfStart() (bool, auth.PolicyOptions, error) {
 	var participants []auth.SessionAccessContext
 
 	for _, party := range s.parties {
+		if party.ctx.Identity.TeleportUser == s.initiator {
+			continue
+		}
+
 		participants = append(participants, auth.SessionAccessContext{
 			Username: party.ctx.Identity.TeleportUser,
 			Roles:    party.ctx.Identity.RoleSet,
+			Mode:     party.mode,
 		})
 	}
 
-	shouldStart, _, err := s.access.FulfilledFor(participants)
+	shouldStart, policyOptions, err := s.access.FulfilledFor(participants)
 	if err != nil {
-		return false, trace.Wrap(err)
+		return false, auth.PolicyOptions{}, trace.Wrap(err)
 	}
 
-	return shouldStart, nil
+	return shouldStart, policyOptions, nil
 }
 
 // addParty is called when a new party joins the session.
@@ -1527,20 +1517,25 @@ func (s *session) addParty(p *party, mode types.SessionParticipantMode) error {
 	s.stateUpdate.L.Lock()
 	defer s.stateUpdate.L.Unlock()
 	if s.state == types.SessionState_SessionStatePending {
-		canStart, err := s.checkIfStart()
+		canStart, _, err := s.checkIfStart()
 		if err != nil {
 			return trace.Wrap(err)
 		}
 
-		if canStart && !s.started {
-			s.started = true
+		if canStart {
+			if !s.started {
+				s.started = true
 
-			go func() {
-				err := s.launch(s.scx)
-				if err != nil {
-					s.log.Errorf("Failed to launch session %v: %v", s.id, err)
-				}
-			}()
+				go func() {
+					err := s.launch(s.scx)
+					if err != nil {
+						s.log.Errorf("Failed to launch session %v: %v", s.id, err)
+					}
+				}()
+			} else {
+				s.state = types.SessionState_SessionStateRunning
+				s.stateUpdate.Broadcast()
+			}
 		}
 	}
 
@@ -1560,7 +1555,7 @@ func (s *session) join(ch ssh.Channel, req *ssh.Request, ctx *ServerContext, mod
 		}
 
 		if !auth.SliceContainsMode(modes, mode) {
-			return nil, trace.AccessDenied("insufficient permissions to join sessions")
+			return nil, trace.AccessDenied("insufficient permissions to join session %v", s.id)
 		}
 
 		if s.presenceEnabled {
@@ -1571,7 +1566,7 @@ func (s *session) join(ch ssh.Channel, req *ssh.Request, ctx *ServerContext, mod
 		}
 	}
 
-	p := newParty(s, ch, ctx)
+	p := newParty(s, mode, ch, ctx)
 	if err := s.addParty(p, mode); err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -1608,7 +1603,7 @@ type party struct {
 	mode       types.SessionParticipantMode
 }
 
-func newParty(s *session, ch ssh.Channel, ctx *ServerContext) *party {
+func newParty(s *session, mode types.SessionParticipantMode, ch ssh.Channel, ctx *ServerContext) *party {
 	return &party{
 		log: log.WithFields(log.Fields{
 			trace.Component: teleport.Component(teleport.ComponentSession, ctx.srv.Component()),
@@ -1624,6 +1619,7 @@ func newParty(s *session, ch ssh.Channel, ctx *ServerContext) *party {
 		sconn:     ctx.ServerConn,
 		termSizeC: make(chan []byte, 5),
 		closeC:    make(chan bool),
+		mode:      mode,
 	}
 }
 

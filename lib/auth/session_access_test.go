@@ -38,10 +38,11 @@ func successStartTestCase(t *testing.T) startTestCase {
 	require.NoError(t, err)
 
 	hostRole.SetSessionRequirePolicies([]*types.SessionRequirePolicy{{
-		Filter:  "contains(participant.roles, \"participant\")",
+		Filter:  "contains(user.roles, \"participant\")",
 		Kinds:   []string{string(types.SSHSessionKind)},
 		Count:   2,
 		OnLeave: types.OnSessionLeaveTerminate,
+		Modes:   []string{"peer"},
 	}})
 
 	participantRole.SetSessionJoinPolicies([]*types.SessionJoinPolicy{{
@@ -58,10 +59,12 @@ func successStartTestCase(t *testing.T) startTestCase {
 			{
 				Username: "participant",
 				Roles:    []types.Role{participantRole},
+				Mode:     "peer",
 			},
 			{
 				Username: "participant2",
 				Roles:    []types.Role{participantRole},
+				Mode:     "peer",
 			},
 		},
 		expected: true,
@@ -75,9 +78,10 @@ func failCountStartTestCase(t *testing.T) startTestCase {
 	require.NoError(t, err)
 
 	hostRole.SetSessionRequirePolicies([]*types.SessionRequirePolicy{{
-		Filter: "contains(participant.roles, \"participant\")",
+		Filter: "contains(user.roles, \"participant\")",
 		Kinds:  []string{string(types.SSHSessionKind)},
 		Count:  3,
+		Modes:  []string{"peer"},
 	}})
 
 	participantRole.SetSessionJoinPolicies([]*types.SessionJoinPolicy{{
@@ -94,10 +98,12 @@ func failCountStartTestCase(t *testing.T) startTestCase {
 			{
 				Username: "participant",
 				Roles:    []types.Role{participantRole},
+				Mode:     "peer",
 			},
 			{
 				Username: "participant2",
 				Roles:    []types.Role{participantRole},
+				Mode:     "peer",
 			},
 		},
 		expected: false,
@@ -111,9 +117,10 @@ func failFilterStartTestCase(t *testing.T) startTestCase {
 	require.NoError(t, err)
 
 	hostRole.SetSessionRequirePolicies([]*types.SessionRequirePolicy{{
-		Filter: "contains(participant.roles, \"host\")",
+		Filter: "contains(user.roles, \"host\")",
 		Kinds:  []string{string(types.SSHSessionKind)},
 		Count:  2,
+		Modes:  []string{"peer"},
 	}})
 
 	participantRole.SetSessionJoinPolicies([]*types.SessionJoinPolicy{{
@@ -130,10 +137,12 @@ func failFilterStartTestCase(t *testing.T) startTestCase {
 			{
 				Username: "participant",
 				Roles:    []types.Role{participantRole},
+				Mode:     "peer",
 			},
 			{
 				Username: "participant2",
 				Roles:    []types.Role{participantRole},
+				Mode:     "peer",
 			},
 		},
 		expected: false,

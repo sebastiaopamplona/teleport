@@ -23,7 +23,6 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"io"
 	mathrand "math/rand"
 	"net"
 	"net/http"
@@ -815,8 +814,8 @@ func (f *Forwarder) remoteJoin(ctx *authContext, w http.ResponseWriter, req *htt
 	}
 
 	url := "wss://" + req.URL.Host
-	if p := req.URL.Port(); p != "" {
-		url = url + ":" + p
+	if req.URL.Port() != "" {
+		url = url + ":" + req.URL.Port()
 	}
 	url = url + req.URL.Path
 
@@ -852,12 +851,8 @@ func wsProxy(wsSource *websocket.Conn, wsTarget *websocket.Conn) error {
 		for {
 			ty, data, err := wsSource.ReadMessage()
 			if err != nil {
-				if err == io.EOF {
-					closeM <- struct{}{}
-				} else {
-					errS <- trace.Wrap(err)
-				}
-
+				wsSource.Close()
+				errS <- trace.Wrap(err)
 				return
 			}
 
@@ -873,10 +868,10 @@ func wsProxy(wsSource *websocket.Conn, wsTarget *websocket.Conn) error {
 	go func() {
 		for {
 			ty, data, err := wsTarget.ReadMessage()
-			if err == io.EOF {
-				closeM <- struct{}{}
-			} else {
+			if err != nil {
+				wsTarget.Close()
 				errT <- trace.Wrap(err)
+				return
 			}
 
 			wsSource.WriteMessage(ty, data)
@@ -961,7 +956,9 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 		return nil, trace.Wrap(err)
 	}
 
+	f.mu.Lock()
 	f.sessions[session.id] = session
+	f.mu.Unlock()
 	err = session.join(party)
 	if err != nil {
 		return nil, trace.Wrap(err)

@@ -66,9 +66,9 @@ func (g *TermManager) writeToClients(p []byte) int {
 	truncateFront := func(slice []byte, max int) []byte {
 		if len(slice) > max {
 			return slice[len(slice)-max:]
-		} else {
-			return slice
 		}
+
+		return slice
 	}
 
 	g.history = append(g.history, truncateFront(p, maxHistory)...)
@@ -163,7 +163,7 @@ func (g *TermManager) writeUnconditional(p []byte) (int, error) {
 
 // BroadcastMessage injects a message into the stream.
 func (g *TermManager) BroadcastMessage(message string) error {
-	data := []byte("\nTeleport > " + message + "\n")
+	data := []byte("\r\nTeleport > " + message + "\r\n")
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	_, err := g.writeUnconditional(data)
@@ -225,7 +225,10 @@ func (g *TermManager) AddReader(name string, r io.Reader) {
 func (g *TermManager) DeleteReader(name string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	atomic.StoreInt32(g.readerState[name], 1)
+
+	if g.readerState[name] != nil {
+		atomic.StoreInt32(g.readerState[name], 1)
+	}
 }
 
 func (g *TermManager) CountWritten() uint64 {

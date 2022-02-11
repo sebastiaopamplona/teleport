@@ -38,6 +38,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -3105,6 +3106,7 @@ func newTerminalHandler() TerminalHandler {
 		log:     logrus.WithFields(logrus.Fields{}),
 		encoder: unicode.UTF8.NewEncoder(),
 		decoder: unicode.UTF8.NewDecoder(),
+		wsLock:  &sync.Mutex{},
 	}
 }
 

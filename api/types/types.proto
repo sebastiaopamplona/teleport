@@ -1681,9 +1681,12 @@ message SessionRequirePolicy {
     // Count is the amount of people that need to be matched for this policy to be fulfilled.
     int32 Count = 4 [ (gogoproto.jsontag) = "count" ];
 
+    // Modes is the list of modes that may be used to fulfill this policy.
+    repeated string Modes = 5 [ (gogoproto.jsontag) = "modes" ];
+
     // OnLeave is the behaviour that's used when the policy is no longer fulfilled
     // for a live session.
-    string OnLeave = 5 [ (gogoproto.jsontag) = "on_leave" ];
+    string OnLeave = 6 [ (gogoproto.jsontag) = "on_leave" ];
 }
 
 // SessionJoinPolicy defines a policy that allows a user to join sessions.

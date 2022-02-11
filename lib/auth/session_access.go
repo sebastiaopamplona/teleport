@@ -73,12 +73,13 @@ func containsKind(s []string, e types.SessionKind) bool {
 type SessionAccessContext struct {
 	Username string
 	Roles    []types.Role
+	Mode     types.SessionParticipantMode
 }
 
 // GetIdentifier is used by the `predicate` library to evaluate variable expressions when
 // evaluating policy filters. It deals with evaluating strings like `participant.name` to the appropriate value.
 func (ctx *SessionAccessContext) GetIdentifier(fields []string) (interface{}, error) {
-	if fields[0] == "participant" {
+	if fields[0] == "user" {
 		if len(fields) == 2 || len(fields) == 3 {
 			switch fields[1] {
 			case "name":
@@ -198,6 +199,16 @@ type PolicyOptions struct {
 	TerminateOnLeave bool
 }
 
+func (e *SessionAccessEvaluator) hasPolicies() bool {
+	for _, policySet := range e.policySets {
+		if len(policySet.RequireSessionJoin) > 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
 // FulfilledFor checks if a given session may run with a list of participants.
 func (e *SessionAccessEvaluator) FulfilledFor(participants []SessionAccessContext) (bool, PolicyOptions, error) {
 	supported, err := e.supportsSessionAccessControls()
@@ -206,7 +217,7 @@ func (e *SessionAccessEvaluator) FulfilledFor(participants []SessionAccessContex
 	}
 
 	// If advanced access controls are supported or no require policies are defined, we allow by default.
-	if len(e.policySets) == 0 || !supported {
+	if !e.hasPolicies() || !supported {
 		return true, PolicyOptions{TerminateOnLeave: true}, nil
 	}
 
@@ -216,14 +227,27 @@ func (e *SessionAccessEvaluator) FulfilledFor(participants []SessionAccessContex
 	// We need every policy set to match to allow the session.
 policySetLoop:
 	for _, policySet := range e.policySets {
+		if len(policySet.RequireSessionJoin) == 0 {
+			continue
+		}
+
 		// Check every require policy to see if it's fulfilled.
 		// Only one needs to be checked to pass the policyset.
 		for _, requirePolicy := range policySet.RequireSessionJoin {
 			// Count of how many additional participant matches we need to fulfill the policy.
 			left := requirePolicy.Count
 
+			var requireModes []types.SessionParticipantMode
+			for _, mode := range requirePolicy.Modes {
+				requireModes = append(requireModes, types.SessionParticipantMode(mode))
+			}
+
 			// Check every participant against the policy.
 			for _, participant := range participants {
+				if !SliceContainsMode(requireModes, participant.Mode) {
+					continue
+				}
+
 				// Check the allow polices attached to the participant against the session.
 				allowPolicies := getAllowPolicies(participant)
 				for _, allowPolicy := range allowPolicies {
@@ -248,7 +272,6 @@ policySetLoop:
 					case types.OnSessionLeavePause:
 						options.TerminateOnLeave = false
 					default:
-						return false, PolicyOptions{}, trace.BadParameter("unsupported on_leave policy: %v", requirePolicy.OnLeave)
 					}
 
 					// We matched at least one require policy within the set. Continue ahead.
@@ -259,7 +282,7 @@ policySetLoop:
 
 		// We failed to match against any require policy and thus the set.
 		// Thus, we can't allow the session.
-		return false, PolicyOptions{}, nil
+		return false, options, nil
 	}
 
 	// All policy sets matched, we can allow the session.
@@ -285,7 +308,7 @@ func (e *SessionAccessEvaluator) supportsSessionAccessControls() (bool, error) {
 		}
 	}
 
-	return false, nil
+	return true, nil
 }
 
 func preAccessControlsModes(kind types.SessionKind) []types.SessionParticipantMode {

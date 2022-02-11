@@ -545,6 +545,7 @@ func (s *session) launch() error {
 		TerminalSizeQueue: s.terminalSizeQueue,
 	}
 
+	s.io.On()
 	if err = executor.Stream(options); err != nil {
 		s.log.WithError(err).Warning("Executor failed while streaming.")
 		return trace.Wrap(err)
@@ -833,65 +834,63 @@ func (s *session) join(p *party) error {
 		return trace.AccessDenied("The requested session is not active")
 	}
 
+	err := s.trackerAddParticipant(p)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	sessionJoinEvent := &apievents.SessionJoin{
+		Metadata: apievents.Metadata{
+			Type:        events.SessionJoinEvent,
+			Code:        events.SessionJoinCode,
+			ClusterName: s.ctx.teleportCluster.name,
+		},
+		KubernetesClusterMetadata: apievents.KubernetesClusterMetadata{
+			KubernetesCluster: s.ctx.kubeCluster,
+			KubernetesUsers:   []string{},
+			KubernetesGroups:  []string{},
+		},
+		SessionMetadata: apievents.SessionMetadata{
+			SessionID: s.id.String(),
+		},
+		UserMetadata: apievents.UserMetadata{
+			User:         p.Ctx.User.GetName(),
+			Login:        "root",
+			Impersonator: p.Ctx.Identity.GetIdentity().Impersonator,
+		},
+		ConnectionMetadata: apievents.ConnectionMetadata{
+			RemoteAddr: s.params.ByName("podName"),
+		},
+	}
+
+	if err := s.emitter.EmitAuditEvent(s.forwarder.ctx, sessionJoinEvent); err != nil {
+		s.forwarder.log.WithError(err).Warn("Failed to emit event.")
+	}
+
+	recentWrites := s.io.GetRecentHistory()
+	_, err = p.Client.stdoutStream().Write(recentWrites)
+	if err != nil {
+		s.log.Warnf("Failed to write history to client: %v.", err)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	stringID := p.ID.String()
 	s.parties[p.ID] = p
 	s.partiesHistorical[p.ID] = p
 
-	go func() {
-		err := s.trackerAddParticipant(p)
-		if err != nil {
-			s.log.Warnf("Failed to update session tracker with new participant: %v.", err)
-		}
-
-		sessionJoinEvent := &apievents.SessionJoin{
-			Metadata: apievents.Metadata{
-				Type:        events.SessionJoinEvent,
-				Code:        events.SessionJoinCode,
-				ClusterName: s.ctx.teleportCluster.name,
-			},
-			KubernetesClusterMetadata: apievents.KubernetesClusterMetadata{
-				KubernetesCluster: s.ctx.kubeCluster,
-				KubernetesUsers:   []string{},
-				KubernetesGroups:  []string{},
-			},
-			SessionMetadata: apievents.SessionMetadata{
-				SessionID: s.id.String(),
-			},
-			UserMetadata: apievents.UserMetadata{
-				User:         p.Ctx.User.GetName(),
-				Login:        "root",
-				Impersonator: p.Ctx.Identity.GetIdentity().Impersonator,
-			},
-			ConnectionMetadata: apievents.ConnectionMetadata{
-				RemoteAddr: s.params.ByName("podName"),
-			},
-		}
-
-		if err := s.emitter.EmitAuditEvent(s.forwarder.ctx, sessionJoinEvent); err != nil {
-			s.forwarder.log.WithError(err).Warn("Failed to emit event.")
-		}
-
-		recentWrites := s.io.GetRecentHistory()
-		_, err = p.Client.stdoutStream().Write(recentWrites)
-		if err != nil {
-			s.log.Warnf("Failed to write history to client: %v.", err)
-		}
-
-		s.io.BroadcastMessage(fmt.Sprintf("User %v joined the session.", p.Ctx.User.GetName()))
-	}()
-
 	if s.tty {
 		s.terminalSizeQueue.add(stringID, p.Client.resizeQueue())
 	}
 
-	if s.tty && p.Ctx.User.GetName() == s.ctx.User.GetName() {
+	if s.tty && p.Mode == types.SessionPeerMode {
 		s.io.AddReader(stringID, p.Client.stdinStream())
 	}
 
 	s.io.AddWriter(stringID, p.Client.stdoutStream())
-	if p.Mode != types.SessionObserverMode {
+	s.io.BroadcastMessage(fmt.Sprintf("User %v joined the session.", p.Ctx.User.GetName()))
+
+	if p.Mode == types.SessionModeratorMode {
 		go func() {
 			c := p.Client.forceTerminate()
 			select {
@@ -924,7 +923,11 @@ func (s *session) join(p *party) error {
 		} else if !s.tty {
 			return trace.AccessDenied("insufficient permissions to launch non-interactive session")
 		} else {
-			s.io.BroadcastMessage("Waiting for required participants...")
+			s.stateUpdate.L.Lock()
+			if s.state == types.SessionState_SessionStatePending {
+				s.io.BroadcastMessage("Waiting for required participants...")
+			}
+			s.stateUpdate.L.Unlock()
 		}
 	}
 
@@ -1050,7 +1053,11 @@ func (s *session) canStart() (bool, auth.PolicyOptions, error) {
 			return false, auth.PolicyOptions{}, trace.Wrap(err)
 		}
 
-		participants = append(participants, auth.SessionAccessContext{Roles: roles})
+		participants = append(participants, auth.SessionAccessContext{
+			Username: party.Ctx.User.GetName(),
+			Roles:    roles,
+			Mode:     party.Mode,
+		})
 	}
 
 	yes, options, err := s.accessEvaluator.FulfilledFor(participants)

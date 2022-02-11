@@ -3137,7 +3137,7 @@ func testControlMaster(t *testing.T, suite *integrationTestSuite) {
 				}
 			}
 			require.NoError(t, err)
-			require.Equal(t, "hello", strings.TrimSpace(string(output)))
+			require.True(t, strings.HasSuffix(strings.TrimSpace(string(output)), "hello"))
 		}
 	}
 }

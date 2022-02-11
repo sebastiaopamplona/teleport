@@ -22,6 +22,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -136,7 +137,7 @@ func TestAppAccessWebsockets(t *testing.T) {
 		{
 			desc:     "invalid application session cookie, websocket request fails to dial",
 			inCookie: "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-			err:      &websocket.HandshakeError{},
+			err:      errors.New(""),
 		},
 	}
 	for _, tt := range tests {
@@ -882,7 +883,7 @@ func setupWithOptions(t *testing.T, opts appTestOptions) *pack {
 	t.Cleanup(rootWSServer.Close)
 	// Secure websockets server in root cluster (wss://).
 	rootWSSServer := httptest.NewTLSServer(createHandler(func(conn *websocket.Conn) {
-		conn.WriteMessage(websocket.BinaryMessage, []byte(p.rootWSMessage))
+		conn.WriteMessage(websocket.BinaryMessage, []byte(p.rootWSSMessage))
 		conn.Close()
 	}))
 	t.Cleanup(rootWSSServer.Close)
@@ -898,7 +899,7 @@ func setupWithOptions(t *testing.T, opts appTestOptions) *pack {
 	t.Cleanup(leafWSServer.Close)
 	// Secure websockets server in leaf cluster (wss://).
 	leafWSSServer := httptest.NewTLSServer(createHandler(func(conn *websocket.Conn) {
-		conn.WriteMessage(websocket.BinaryMessage, []byte(p.leafWSMessage))
+		conn.WriteMessage(websocket.BinaryMessage, []byte(p.leafWSSMessage))
 		conn.Close()
 	}))
 	t.Cleanup(leafWSSServer.Close)
@@ -1367,14 +1368,14 @@ func (p *pack) makeWebsocketRequest(sessionCookie, endpoint string) (string, err
 	}
 	conn, resp, err := dialer.Dial(fmt.Sprintf("wss://%s%s", net.JoinHostPort(Loopback, p.rootCluster.GetPortWeb()), endpoint), header)
 	if err != nil {
-		return "", trace.Wrap(err)
+		return "", err
 	}
 	defer conn.Close()
 	defer resp.Body.Close()
 	stream := &utils.WebSocketIO{Conn: conn}
 	data, err := io.ReadAll(stream)
-	if err != nil {
-		return "", trace.Wrap(err)
+	if err != nil && websocket.IsUnexpectedCloseError(err, websocket.CloseAbnormalClosure) {
+		return "", err
 	}
 	return string(data), nil
 }

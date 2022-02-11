@@ -95,6 +95,8 @@ func NewKubeSession(ctx context.Context, tc *TeleportClient, meta types.SessionT
 		term.InitRaw(true)
 	}
 
+	stdout := utils.NewSyncWriter(term.Stdout())
+
 	go func() {
 		handleOutgoingResizeEvents(ctx, stream, term)
 	}()
@@ -106,12 +108,12 @@ func NewKubeSession(ctx context.Context, tc *TeleportClient, meta types.SessionT
 	}()
 
 	s := &KubeSession{stream: stream, term: term, ctx: ctx, cancelFunc: cancel, closeWait: closeWait, meta: meta}
-	err = s.handleMFA(ctx, tc, mode)
+	err = s.handleMFA(ctx, tc, mode, stdout)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	s.pipeInOut()
+	s.pipeInOut(stdout, mode)
 	return s, nil
 }
 
@@ -159,11 +161,9 @@ func handleIncomingResizeEvents(stream *streamproto.SessionStream, term *termina
 			break
 		}
 	}
-
-	return
 }
 
-func (s *KubeSession) handleMFA(ctx context.Context, tc *TeleportClient, mode types.SessionParticipantMode) error {
+func (s *KubeSession) handleMFA(ctx context.Context, tc *TeleportClient, mode types.SessionParticipantMode, stdout io.Writer) error {
 	if s.stream.MFARequired && mode == types.SessionModeratorMode {
 		proxy, err := tc.ConnectToProxy(ctx)
 		if err != nil {
@@ -181,17 +181,17 @@ func (s *KubeSession) handleMFA(ctx context.Context, tc *TeleportClient, mode ty
 			cancel()
 		}()
 
-		go runPresenceTask(subCtx, s.term.Stdout(), auth, tc, s.meta.GetSessionID())
+		go runPresenceTask(subCtx, stdout, auth, tc, s.meta.GetSessionID())
 	}
 
 	return nil
 }
 
 // pipeInOut starts background tasks that copy input to and from the terminal.
-func (s *KubeSession) pipeInOut() {
+func (s *KubeSession) pipeInOut(stdout io.Writer, mode types.SessionParticipantMode) {
 	go func() {
 		defer s.cancel()
-		_, err := io.Copy(s.term.Stdout(), s.stream)
+		_, err := io.Copy(stdout, s.stream)
 		if err != nil {
 			fmt.Printf("Error while reading remote stream: %v\n\r", err.Error())
 		}
@@ -200,7 +200,7 @@ func (s *KubeSession) pipeInOut() {
 	go func() {
 		defer s.cancel()
 
-		handleNonPeerControls(s.stream.Mode, s.term, func() {
+		handleNonPeerControls(mode, s.term, func() {
 			err := s.stream.ForceTerminate()
 			if err != nil {
 				fmt.Printf("\n\rError while sending force termination request: %v\n\r", err.Error())

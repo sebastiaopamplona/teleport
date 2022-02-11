@@ -131,6 +131,7 @@ func NewTerminal(ctx context.Context, req TerminalRequest, authProvider AuthProv
 		authProvider: authProvider,
 		encoder:      unicode.UTF8.NewEncoder(),
 		decoder:      unicode.UTF8.NewDecoder(),
+		wsLock:       &sync.Mutex{},
 	}, nil
 }
 
@@ -179,7 +180,7 @@ type TerminalHandler struct {
 
 	closeOnce sync.Once
 
-	wsLock sync.Mutex
+	wsLock *sync.Mutex
 }
 
 // Serve builds a connect to the remote node and then pumps back two types of

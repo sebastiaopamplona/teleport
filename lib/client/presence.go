@@ -27,18 +27,15 @@ import (
 	"github.com/gravitational/trace"
 )
 
-func runPresenceTask(ctx context.Context, out io.Writer, auth auth.ClientI, tc *TeleportClient, sessionID string) error {
-	_, err := out.Write([]byte("\r\nTeleport > MFA presence enabled\r\n"))
-	if err != nil {
-		return trace.Wrap(err)
-	}
+func runPresenceTask(ctx context.Context, term io.Writer, auth auth.ClientI, tc *TeleportClient, sessionID string) error {
+	fmt.Fprintf(term, "\r\nTeleport > MFA presence enabled\r\n")
 
 	ticker := time.NewTicker(mfaChallengeInterval)
 	defer ticker.Stop()
 
 	stream, err := auth.MaintainSessionPresence(ctx)
 	if err != nil {
-		out.Write([]byte(fmt.Sprintf("\r\nstream error: %v\r\n", err)))
+		fmt.Fprintf(term, "\r\nstream error: %v\r\n", err)
 		return trace.Wrap(err)
 	}
 
@@ -61,7 +58,7 @@ func runPresenceTask(ctx context.Context, out io.Writer, auth auth.ClientI, tc *
 				return trace.Wrap(err)
 			}
 
-			solution, err := solveMFA(ctx, out, tc, challenge)
+			solution, err := solveMFA(ctx, term, tc, challenge)
 			if err != nil {
 				return trace.Wrap(err)
 			}
@@ -83,10 +80,7 @@ func runPresenceTask(ctx context.Context, out io.Writer, auth auth.ClientI, tc *
 }
 
 func solveMFA(ctx context.Context, term io.Writer, tc *TeleportClient, challenge *proto.MFAAuthenticateChallenge) (*proto.MFAAuthenticateResponse, error) {
-	_, err := term.Write([]byte("\r\nTeleport > Please tap your MFA key\r\n"))
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
+	fmt.Fprint(term, "\r\nTeleport > Please tap your MFA key\r\n")
 
 	// This is here to enforce the usage of an U2F or WebAuthn device.
 	// We don't support TOTP for live presence.
@@ -94,13 +88,10 @@ func solveMFA(ctx context.Context, term io.Writer, tc *TeleportClient, challenge
 
 	response, err := PromptMFAChallenge(ctx, tc.Config.WebProxyAddr, challenge, "", true)
 	if err != nil {
-		term.Write([]byte(fmt.Sprintf("\r\nTeleport > Failed to confirm presence: %v\r\n", err)))
+		fmt.Fprintf(term, "\r\nTeleport > Failed to confirm presence: %v\r\n", err)
 		return nil, trace.Wrap(err)
 	}
 
-	_, err = term.Write([]byte("\r\nTeleport > Received MFA presence confirmation\r\n"))
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
+	fmt.Fprint(term, "\r\nTeleport > Received MFA presence confirmation\r\n")
 	return response, nil
 }

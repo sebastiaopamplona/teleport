@@ -22,6 +22,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"os"
 
 	"strings"
 	"time"
@@ -415,7 +416,7 @@ func newKubeExecCommand(parent *kingpin.CmdClause) *kubeExecCommand {
 	c.Flag("reason", "The purpose of the session.").StringVar(&c.reason)
 	c.Flag("invite", "A comma separated list of people to mark as invited for the session.").StringVar(&c.invited)
 	c.Arg("target", "Pod or deployment name").Required().StringVar(&c.target)
-	c.Arg("command", "Command to execute in the container").StringsVar(&c.command)
+	c.Arg("command", "Command to execute in the container").Required().StringsVar(&c.command)
 	return c
 }
 
@@ -423,6 +424,11 @@ func (c *kubeExecCommand) run(cf *CLIConf) error {
 	var p ExecOptions
 	var err error
 
+	p.IOStreams = genericclioptions.IOStreams{
+		In:     os.Stdin,
+		Out:    os.Stdout,
+		ErrOut: os.Stderr,
+	}
 	kubeConfigFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
 	matchVersionKubeConfigFlags := cmdutil.NewMatchVersionFlags(kubeConfigFlags)
 	f := cmdutil.NewFactory(matchVersionKubeConfigFlags)
@@ -436,6 +442,7 @@ func (c *kubeExecCommand) run(cf *CLIConf) error {
 	p.GetPodTimeout = time.Second * 5
 	p.Builder = f.NewBuilder
 	p.restClientGetter = f
+	p.Executor = &DefaultRemoteExecutor{}
 	p.Namespace, p.EnforceNamespace, err = f.ToRawKubeConfigLoader().Namespace()
 	if err != nil {
 		return trace.Wrap(err)
