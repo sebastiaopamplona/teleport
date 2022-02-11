@@ -90,6 +90,15 @@ func TestCheckLatest(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			desc: "fail-lexigraphic",
+			tag:  "v8.0.9",
+			releases: []string{
+				"v8.0.8",
+				"v8.0.10",
+			},
+			wantErr: true,
+		},
+		{
 			desc: "pass-new-releases",
 			tag:  "v8.0.1",
 			releases: []string{
