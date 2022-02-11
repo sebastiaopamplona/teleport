@@ -596,6 +596,12 @@ func (s *IdentityService) UpsertWebauthnLocalAuth(ctx context.Context, user stri
 	if err != nil {
 		return trace.WrapWithMessage(err, "marshal webauthn user")
 	}
+	// There is a risk that the second Put will fail, leaving the database in an
+	// incosistent state. Due to legacy entries, which write only the
+	// WebauthnLocalAuth, this is already a possibility, so we are prepared to
+	// deal with those scenarios.
+	// To avoid funky behavior, it's important for registration of new WebAuthn
+	// devices to fail if UpsertWebauthnLocalAuth fails (which it does).
 	if _, err = s.Put(ctx, backend.Item{
 		Key:   webauthnUserKey(wla.UserID),
 		Value: userJSON,
