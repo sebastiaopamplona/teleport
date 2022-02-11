@@ -787,16 +787,16 @@ steps:
       PREVIOUS_VERSION_ONE_ROOT: v7
       PREVIOUS_VERSION_TWO_ROOT: v6
     commands:
-      - apk --update --no-cache add curl
+      - apk --update --no-cache add curl go
       - mkdir -p /go/build && cd /go/build
       # CURRENT_VERSION (8)
-      - (cd build.assets/version-ops && go run ./cmd/query-latest -version-spec  $CURRENT_VERSION_ROOT > /go/build/CURRENT_VERSION_TAG.txt)
+      - (cd /go/build.assets/version-ops && go run ./cmd/query-latest -version-spec $CURRENT_VERSION_ROOT > /go/build/CURRENT_VERSION_TAG.txt)
       - echo "$(cat /go/build/CURRENT_VERSION_TAG.txt | cut -d. -f1 | tr -d '^v')" > /go/build/CURRENT_VERSION_TAG_GENERIC.txt
       # PREVIOUS_VERSION_ONE (7)
-      - (cd build.assets/version-ops && go run ./cmd/query-latest -version-spec  $CURRENT_VERSION_ONE_ROOT > /go/build/CURRENT_VERSION_ONE_TAG.txt)
+      - (cd /go/build.assets/version-ops && go run ./cmd/query-latest -version-spec $PREVIOUS_VERSION_ONE_ROOT > /go/build/PREVIOUS_VERSION_ONE_TAG.txt)
       - echo "$(cat /go/build/PREVIOUS_VERSION_ONE_TAG.txt | cut -d. -f1 | tr -d '^v')" > /go/build/PREVIOUS_VERSION_ONE_TAG_GENERIC.txt
       # PREVIOUS_VERSION_TWO (6)
-      - (cd build.assets/version-ops && go run ./cmd/query-latest -version-spec  $CURRENT_VERSION_TWO_ROOT > /go/build/CURRENT_VERSION_TWO_TAG.txt)
+      - (cd /go/build.assets/version-ops && go run ./cmd/query-latest -version-spec $PREVIOUS_VERSION_TWO_ROOT > /go/build/PREVIOUS_VERSION_TWO_TAG.txt)
       - echo "$(cat /go/build/PREVIOUS_VERSION_TWO_TAG.txt | cut -d. -f1 | tr -d '^v')" > /go/build/PREVIOUS_VERSION_TWO_TAG_GENERIC.txt
       # list versions
       - for FILE in /go/build/*.txt; do echo $FILE; cat $FILE; done
@@ -5184,6 +5184,6 @@ volumes:
       name: drone-s3-debrepo-pvc
 ---
 kind: signature
-hmac: c7d549ab70b184eb184d64f751f09403daed93e32650a363f14375d7384fe0aa
+hmac: b4d7b5f26c8e1ef3b21899e255b1928835b499a6ec9c7524ad8984868c15a6f5
 
 ...
