@@ -33,22 +33,22 @@ import (
 	wantypes "github.com/gravitational/teleport/api/types/webauthn"
 )
 
-func newIdentityService(t *testing.T) (*local.IdentityService, clockwork.Clock) {
+func newIdentityService(t *testing.T, clock clockwork.Clock) *local.IdentityService {
 	t.Helper()
-	clock := clockwork.NewFakeClock()
 	backend, err := lite.NewWithConfig(context.Background(), lite.Config{
 		Path:             t.TempDir(),
 		PollStreamPeriod: 200 * time.Millisecond,
 		Clock:            clock,
 	})
 	require.NoError(t, err)
-	return local.NewIdentityService(backend), clock
+	return local.NewIdentityService(backend)
 }
 
 func TestRecoveryCodesCRUD(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	identity, clock := newIdentityService(t)
+	clock := clockwork.NewFakeClock()
+	identity := newIdentityService(t, clock)
 
 	// Create a recovery codes resource.
 	mockedCodes := []types.RecoveryCode{
@@ -127,7 +127,8 @@ func TestRecoveryCodesCRUD(t *testing.T) {
 func TestRecoveryAttemptsCRUD(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	identity, clock := newIdentityService(t)
+	clock := clockwork.NewFakeClock()
+	identity := newIdentityService(t, clock)
 
 	// Predefine times for equality check.
 	time1 := clock.Now()
@@ -188,7 +189,7 @@ func TestRecoveryAttemptsCRUD(t *testing.T) {
 
 func TestIdentityService_UpsertMFADevice(t *testing.T) {
 	t.Parallel()
-	identity, _ := newIdentityService(t)
+	identity := newIdentityService(t, clockwork.NewFakeClock())
 
 	tests := []struct {
 		name string
@@ -259,7 +260,7 @@ func TestIdentityService_UpsertMFADevice(t *testing.T) {
 
 func TestIdentityService_UpsertMFADevice_errors(t *testing.T) {
 	t.Parallel()
-	identity, _ := newIdentityService(t)
+	identity := newIdentityService(t, clockwork.NewFakeClock())
 
 	totpDev := &types.MFADevice{
 		Metadata: types.Metadata{
@@ -390,7 +391,7 @@ func TestIdentityService_UpsertMFADevice_errors(t *testing.T) {
 
 func TestIdentityService_UpsertWebauthnLocalAuth(t *testing.T) {
 	t.Parallel()
-	identity, _ := newIdentityService(t)
+	identity := newIdentityService(t, clockwork.NewFakeClock())
 
 	updateViaUser := func(ctx context.Context, user string, wal *types.WebauthnLocalAuth) error {
 		u, err := types.NewUser(user)
@@ -495,7 +496,7 @@ func TestIdentityService_UpsertWebauthnLocalAuth(t *testing.T) {
 
 func TestIdentityService_GetTeleportUserByWebauthnID(t *testing.T) {
 	t.Parallel()
-	identity, _ := newIdentityService(t)
+	identity := newIdentityService(t, clockwork.NewFakeClock())
 
 	tests := []struct {
 		name      string
@@ -526,7 +527,7 @@ func TestIdentityService_GetTeleportUserByWebauthnID(t *testing.T) {
 
 func TestIdentityService_WebauthnSessionDataCRUD(t *testing.T) {
 	t.Parallel()
-	identity, _ := newIdentityService(t)
+	identity := newIdentityService(t, clockwork.NewFakeClock())
 
 	const user1 = "llama"
 	const user2 = "alpaca"
