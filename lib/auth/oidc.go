@@ -433,7 +433,7 @@ func (a *Server) calculateOIDCUser(connector types.OIDCConnector, claims jose.Cl
 	p.traits = services.OIDCClaimsToTraits(claims)
 
 	var warnings []string
-	warnings, p.roles = services.TraitsToRoles(connector.GetTraitMappings(), p.traits)
+	warnings, p.roles = services.TraitsToRoles(connector.GetDynamicTraitMappings(claims), p.traits)
 	if len(p.roles) == 0 {
 		if len(warnings) != 0 {
 			log.WithField("connector", connector).Warnf("Unable to map attibutes to roles: %q", warnings)

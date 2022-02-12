@@ -15,4 +15,9 @@ require (
 	google.golang.org/grpc v1.43.0
 	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
 	gopkg.in/yaml.v2 v2.4.0
+	github.com/coreos/go-oidc v0.0.4
 )
+
+replace (
+	github.com/coreos/go-oidc => github.com/gravitational/go-oidc v0.0.5
+	)
