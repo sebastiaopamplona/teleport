@@ -17,12 +17,15 @@ limitations under the License.
 package types
 
 import (
+	"strings"
 	"time"
 
 	"github.com/gravitational/teleport/api/constants"
 	"github.com/gravitational/teleport/api/utils"
 
 	"github.com/gravitational/trace"
+
+	"github.com/coreos/go-oidc/jose"
 )
 
 // OIDCConnector specifies configuration for Open ID Connect compatible external
@@ -56,6 +59,9 @@ type OIDCConnector interface {
 	// GetTraitMappings converts gets all claim mappings in the
 	// generic trait mapping format.
 	GetTraitMappings() TraitMappingSet
+	// GetDynamicTraitMappings converts gets all claim mappings in the
+	// generic trait mapping format, supporting dynamic claims_to_roles.
+	GetDynamicTraitMappings(claims jose.Claims) TraitMappingSet
 	// SetClientSecret sets client secret to some value
 	SetClientSecret(secret string)
 	// SetClientID sets id for authentication client (in our case it's our Auth server)
@@ -330,6 +336,57 @@ func (o *OIDCConnectorV3) GetTraitMappings() TraitMappingSet {
 			Value: mapping.Value,
 			Roles: mapping.Roles,
 		})
+	}
+	return TraitMappingSet(tms)
+}
+
+// GetDynamicTraitMappings returns the OIDCConnector's TraitMappingSet, using the claims
+// dynamic syntax, ie:
+// claims_to_roles:
+// - claim: application_username
+//   value: '{{claims.application_username}}'
+//   roles:
+//   - '{{claims.application_username}}'
+//
+// and a claim: <application_username: "george123">
+//
+// ^ would map the user george123 to the role george123
+func (o *OIDCConnectorV3) GetDynamicTraitMappings(claims jose.Claims) TraitMappingSet {
+	tms := make([]TraitMapping, 0, len(o.Spec.ClaimsToRoles))
+	for _, mapping := range o.Spec.ClaimsToRoles {
+		var value string
+		var roles []string
+
+		if strings.HasPrefix(mapping.Value, `{{claims.`) {
+			claimName := strings.TrimSuffix(strings.TrimPrefix(mapping.Value, `{{claims.`), `}}`)
+			v, ok, _ := claims.StringClaim(claimName)
+			if ok {
+				value = v
+			}
+		} else {
+			value = mapping.Value
+		}
+
+		for _, role := range mapping.Roles {
+			if strings.HasPrefix(role, `{{claims.`) {
+				claimName := strings.TrimSuffix(strings.TrimPrefix(role, `{{claims.`), `}}`)
+				v, ok, _ := claims.StringClaim(claimName)
+				if ok {
+					roles = append(roles, v)
+				} else {
+					roles = append(roles, role)
+				}
+			} else {
+				roles = append(roles, role)
+			}
+		}
+
+		tms = append(tms, TraitMapping{
+			Trait: mapping.Claim,
+			Value: value,
+			Roles: roles,
+		})
+
 	}
 	return TraitMappingSet(tms)
 }
